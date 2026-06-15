@@ -355,21 +355,31 @@ const HexaConnectGame = ({ mode, onEnd }) => {
         return Math.abs(r1 - r2) <= 1 && Math.abs(c1 - c2) <= 1 && !(r1===r2 && c1===c2);
     };
 
-    // 정밀 터치 판별 로직: elementFromPoint 대신 DOM Rect 직접 스캔
+    // [핵심 변경] 중심점 반경(거리) 기준 정밀 터치 판별 알고리즘 (대각선 간섭 및 데드존 해결)
     const getIndexFromPointer = (clientX, clientY) => {
         if (!boardRef.current) return null;
         const elements = boardRef.current.querySelectorAll('[data-index]');
+        let closestIdx = null;
+        let minDist = Infinity;
+
         for (let i = 0; i < elements.length; i++) {
             const el = elements[i];
             const rect = el.getBoundingClientRect();
-            // 패딩 5px을 덧붙여 모바일에서 손가락이 약간 엇나가도 잘 잡히도록 보정
-            const pad = 5; 
-            if (clientX >= rect.left - pad && clientX <= rect.right + pad &&
-                clientY >= rect.top - pad && clientY <= rect.bottom + pad) {
-                return parseInt(el.getAttribute('data-index'), 10);
+            
+            // 각 셀(원자)의 중앙 좌표 계산
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
+            
+            // 피타고라스 정리로 손가락과 중심 사이의 실제 거리 계산
+            const dist = Math.hypot(clientX - cx, clientY - cy);
+
+            // 셀 너비의 약 80% 반경 이내일 때만 판정 (사각형 겹침 무시, 대각선 틈새 허용)
+            if (dist < rect.width * 0.8 && dist < minDist) {
+                minDist = dist;
+                closestIdx = parseInt(el.getAttribute('data-index'), 10);
             }
         }
-        return null;
+        return closestIdx;
     };
 
     const handlePointerDown = (idx) => { 
@@ -387,6 +397,7 @@ const HexaConnectGame = ({ mode, onEnd }) => {
             clientY = e.touches[0].clientY; 
         }
         
+        // 정교한 거리 스캔 로직으로 현재 가리키는 원자 찾기
         const idx = getIndexFromPointer(clientX, clientY);
         
         if (idx !== null && grid[idx]) {
@@ -396,7 +407,7 @@ const HexaConnectGame = ({ mode, onEnd }) => {
                 setPath(prev => prev.slice(0, -1)); 
                 if (navigator.vibrate) navigator.vibrate(15);
             } else if (!path.includes(idx) && isAdjacent(lastIdx, idx)) {
-                // 새로운 셀 연결
+                // 새로운 인접 셀 연결
                 setPath(prev => [...prev, idx]);
                 if (navigator.vibrate) navigator.vibrate(15);
             }
@@ -745,14 +756,17 @@ const DictionaryModal = ({ isOpen, onClose }) => {
     );
 };
 
-const IntroView = ({ onSelectMode, onOpenReport }) => {
+const IntroView = ({ onSelectMode, onOpenReport, onOpenGuide }) => {
     const [isDictOpen, setIsDictOpen] = useState(false);
 
     return (
         <div className="flex flex-col items-center h-full p-4 text-center scrollable-panel pt-[max(16px,var(--safe-top))] pb-[max(16px,var(--safe-bottom))] h-screen-safe">
-            <div className="w-full max-w-md mb-4 mt-8">
-                <button onClick={onOpenReport} className="w-full bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 border border-emerald-500/30 py-3 px-2 rounded-xl text-sm font-black transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/5 animate-pulse-fast">
-                    📝 최종 보고서 (수업 종료 시 제출)
+            <div className="w-full max-w-md flex justify-between gap-2 mb-4 mt-8">
+                <button onClick={onOpenGuide} className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 py-2.5 px-1.5 rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1">
+                    ⚙️ 교사 가이드
+                </button>
+                <button onClick={onOpenReport} className="flex-1 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 border border-emerald-500/30 py-2.5 px-1.5 rounded-xl text-xs font-black transition-all active:scale-95 flex items-center justify-center gap-1 shadow-lg shadow-emerald-500/5 animate-pulse-fast">
+                    📝 최종 보고서 제출
                 </button>
             </div>
 
@@ -1038,20 +1052,8 @@ const App = () => {
 
     return (
         <div className="relative w-full h-screen-safe overflow-hidden font-sans text-slate-50 bg-slate-900">
-            {/* 우측 상단 고정: 교사 가이드 버튼 */}
-            {view === 'intro' && (
-                <div className="absolute top-[max(16px,var(--safe-top))] right-4 z-50">
-                    <button 
-                        onClick={() => setIsGuideOpen(true)} 
-                        className="bg-slate-800/90 backdrop-blur border border-slate-600 text-slate-200 px-3 py-1.5 rounded-full text-xs font-bold shadow-lg hover:bg-slate-700 transition active:scale-95"
-                    >
-                        ⚙️ DB 연동 가이드
-                    </button>
-                </div>
-            )}
-            
             <div className="w-full h-full">
-                {view === 'intro' && <IntroView onSelectMode={(mode) => navigate(mode)} onOpenReport={() => navigate('report')} />}
+                {view === 'intro' && <IntroView onSelectMode={(mode) => navigate(mode)} onOpenReport={() => navigate('report')} onOpenGuide={() => setIsGuideOpen(true)} />}
                 {(view === 'time' || view === 'mission' || view === 'survival' || view === 'zen') && <HexaConnectGame mode={view} onEnd={(s) => { setGameData({ score: s, mode: view }); navigate('result'); }} />}
                 {view === 'result' && <ResultView gameData={gameData} onSubmit={() => navigate('intro')} />}
                 {view === 'report' && <FinalReportView onBack={() => navigate('intro')} />}
