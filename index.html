@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>분자 퍼즐 마스터</title>
+    
+    <!-- React & Tailwind -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['"Noto Sans KR"', 'sans-serif'] },
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        :root { --safe-top: env(safe-area-inset-top, 0px); --safe-bottom: env(safe-area-inset-bottom, 0px); }
+        body { background-color: #0f172a; color: #f8fafc; overflow: hidden; user-select: none; -webkit-user-select: none; touch-action: none; }
+        .h-screen-safe { height: 100dvh; height: calc(var(--vh, 1vh) * 100); }
+        
+        .scrollable-panel { overflow-y: auto; touch-action: pan-y; }
+        .scrollable-panel::-webkit-scrollbar { width: 4px; }
+        .scrollable-panel::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+        .scrollable-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        
+        .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        
+        @keyframes popUp { 0% { transform: scale(0.5); opacity: 0; } 50% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+        .animate-pop { animation: popUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        
+        @keyframes floatUp { 0% { transform: translateY(0) scale(0.8); opacity: 0; } 20% { transform: translateY(-20px) scale(1.1); opacity: 1; } 80% { transform: translateY(-60px) scale(1); opacity: 1; } 100% { transform: translateY(-80px) scale(0.9); opacity: 0; } }
+        .animate-float { animation: floatUp 1.5s ease-out forwards; pointer-events: none; }
+
+        @keyframes pulse-fast { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.8; transform: scale(1.05); } }
+        .animate-pulse-fast { animation: pulse-fast 0.5s ease-in-out infinite; }
+        
+        @keyframes slidedown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-slidedown { animation: slidedown 0.3s ease-out forwards; }
+        
+        @keyframes spin-slow { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .animate-spin-slow { animation: spin-slow 2s linear infinite; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+<script type="text/babel">
+// iOS Height Fix
+const setVH = () => document.documentElement.style.setProperty('--vh', `${window.innerHeight * 0.01}px`);
+window.addEventListener('resize', setVH); setVH();
+
+// Google Apps Script URL (배포 후 이곳에 붙여넣으세요)
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwqmvZ02o6p5BYY_MhHPXtwdZ61PYtnfW2h0L_e0COBdxKLsCh7FnVIXTZ9hXlJzT4/exec"; 
+
+// ==========================================
+// 게임 데이터 및 설정
+// ==========================================
+const ATOM_INFO = {
+    H: { color: '#f8fafc', text: '#0f172a' }, O: { color: '#ef4444', text: '#ffffff' },
+    C: { color: '#64748b', text: '#ffffff' }, N: { color: '#3b82f6', text: '#ffffff' },
+    Cl:{ color: '#22c55e', text: '#ffffff' }, S: { color: '#eab308', text: '#0f172a' },
+    F: { color: '#d946ef', text: '#ffffff' }
+};
+
+const ATOM_POOL = ['H','H','H','H','H','H','O','O','O','O','O','C','C','C','N','N','Cl','Cl','F','F','F','S'];
+
+const MOLECULES = [
+    { id: 'H2', name: '수소 기체', formulaHtml: 'H<sub>2</sub>', formula: { H: 2 } },
+    { id: 'O2', name: '산소 기체', formulaHtml: 'O<sub>2</sub>', formula: { O: 2 } },
+    { id: 'N2', name: '질소 기체', formulaHtml: 'N<sub>2</sub>', formula: { N: 2 } },
+    { id: 'Cl2', name: '염소 기체', formulaHtml: 'Cl<sub>2</sub>', formula: { Cl: 2 } },
+    { id: 'F2', name: '플루오린 기체', formulaHtml: 'F<sub>2</sub>', formula: { F: 2 } },
+    { id: 'H2O', name: '물', formulaHtml: 'H<sub>2</sub>O', formula: { H: 2, O: 1 } },
+    { id: 'CO2', name: '이산화 탄소', formulaHtml: 'CO<sub>2</sub>', formula: { C: 1, O: 2 } },
+    { id: 'CH4', name: '메테인', formulaHtml: 'CH<sub>4</sub>', formula: { C: 1, H: 4 } },
+    { id: 'NH3', name: '암모니아', formulaHtml: 'NH<sub>3</sub>', formula: { N: 1, H: 3 } },
+    { id: 'HCl', name: '염화 수소', formulaHtml: 'HCl', formula: { H: 1, Cl: 1 } },
+    { id: 'H2O2', name: '과산화 수소', formulaHtml: 'H<sub>2</sub>O<sub>2</sub>', formula: { H: 2, O: 2 } },
+    { id: 'O3', name: '오존', formulaHtml: 'O<sub>3</sub>', formula: { O: 3 } },
+    { id: 'SO2', name: '이산화 황', formulaHtml: 'SO<sub>2</sub>', formula: { S: 1, O: 2 } },
+    { id: 'CF4', name: '사플루오린화 탄소', formulaHtml: 'CF<sub>4</sub>', formula: { C: 1, F: 4 } }
+];
+
+const QUIZ_POOL = [
+    { q: "물(H₂O)과 과산화 수소(H₂O₂)는 구성 원소가 같으므로 성질도 동일한 분자이다.", a: false, explain: "구성 원소가 같더라도 결합된 원자 개수가 다르면 완전히 다른 성질의 분자가 됩니다." },
+    { q: "메테인(CH₄)은 탄소 원자 1개와 수소 원자 4개가 화학 결합을 이룬 분자이다.", a: true, explain: "메테인은 C 1개, H 4개가 결합하여 만들어진 분자입니다." },
+    { q: "오존(O₃)은 산소 원자 3개로 구성된, 단 한 가지 원소로만 이루어진 분자이다.", a: true, explain: "오존은 오직 산소(O) 원소 1종류로만 이루어져 있는 단일 원소 물질 분자입니다." },
+    { q: "이산화 황(SO₂)은 황 원자 1개와 산소 원자 2개가 결합한 화합물이다.", a: true, explain: "S 1개와 O 2개가 규칙적으로 결합한 이산화 황 화합물 분자가 맞습니다." }
+];
+
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+// ==========================================
+// 공통 UI 컴포넌트
+// ==========================================
+const Button = ({ children, onClick, className = "", variant = "primary", disabled=false }) => {
+    const base = "font-bold rounded-xl transition-all active:scale-95 flex items-center justify-center disabled:opacity-50 disabled:active:scale-100";
+    const variants = {
+        primary: "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20 px-6 py-4 text-lg",
+        emerald: "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 px-6 py-4 text-lg",
+        danger: "bg-red-600 hover:bg-red-500 text-white shadow-lg px-6 py-4 text-lg",
+        secondary: "bg-slate-700 hover:bg-slate-600 text-slate-100 px-4 py-3 text-sm"
+    };
+    return <button className={`${base} ${variants[variant]} ${className}`} onClick={onClick} disabled={disabled}>{children}</button>;
+};
+
+const Modal = ({ isOpen, onClose, title, children }) => {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl flex flex-col max-h-[85dvh]">
+                <h2 className="text-xl font-bold mb-4 text-white flex items-center gap-2">{title}</h2>
+                <div className="text-slate-300 mb-6 flex-1 overflow-y-auto scrollable-panel pr-1 space-y-4">{children}</div>
+                <Button onClick={onClose} className="w-full py-3" variant="secondary">확인</Button>
+            </div>
+        </div>
+    );
+};
+
+// 파티클 엔진
+class ParticleEngine {
+    constructor(canvas) {
+        this.canvas = canvas; this.ctx = canvas.getContext('2d');
+        this.particles = []; this.width = 0; this.height = 0;
+        this.animationId = null;
+        this.resize();
+    }
+    resize() {
+        if(!this.canvas || !this.canvas.parentNode) return;
+        const rect = this.canvas.parentNode.getBoundingClientRect();
+        this.width = rect.width; this.height = rect.height;
+        this.canvas.width = this.width * 2; this.canvas.height = this.height * 2;
+        this.canvas.style.width = `${this.width}px`; this.canvas.style.height = `${this.height}px`;
+        this.ctx.scale(2, 2);
+    }
+    start() { if(!this.animationId) this.loop(); }
+    stop() { cancelAnimationFrame(this.animationId); this.animationId = null; }
+    
+    explode(x, y, colorStr = '#3b82f6', count = 30) {
+        for(let i=0; i<count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = Math.random() * 8 + 2;
+            this.particles.push({
+                x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+                life: 1.0, decay: Math.random() * 0.03 + 0.02, color: colorStr, size: Math.random() * 5 + 2
+            });
+        }
+    }
+    
+    loop = () => {
+        this.ctx.clearRect(0, 0, this.width, this.height);
+        for(let i=this.particles.length-1; i>=0; i--) {
+            let p = this.particles[i];
+            p.x += p.vx; p.y += p.vy; p.vy += 0.2; 
+            p.life -= p.decay;
+            if(p.life <= 0) { this.particles.splice(i, 1); continue; }
+            this.ctx.globalAlpha = p.life;
+            this.ctx.fillStyle = p.color;
+            this.ctx.beginPath(); this.ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); this.ctx.fill();
+        }
+        this.ctx.globalAlpha = 1.0;
+        this.animationId = requestAnimationFrame(this.loop);
+    }
+}
+
+const FloatingMessage = ({ message, onComplete }) => {
+    useEffect(() => {
+        const timer = setTimeout(onComplete, 1500);
+        return () => clearTimeout(timer);
+    }, [onComplete]);
+
+    return (
+        <div 
+            className="absolute z-50 animate-float font-black text-xl px-3 py-1 rounded-xl border-2 shadow-2xl flex flex-col items-center justify-center whitespace-nowrap bg-slate-800 text-emerald-400 border-emerald-500 pointer-events-none"
+            style={{ left: message.x, top: message.y, transform: 'translate(-50%, -50%)' }}
+        >
+            <span dangerouslySetInnerHTML={{ __html: message.text }}></span>
+            {message.bonus && <span className="text-yellow-400 text-xs mt-0.5">+{message.bonus}점</span>}
+        </div>
+    );
+};
+
+// ==========================================
+// 메인 게임 엔진 (한붓그리기)
+// ==========================================
+const HexaConnectGame = ({ mode, onEnd }) => {
+    const GRID_SIZE = 6;
+    const TOTAL_CELLS = GRID_SIZE * GRID_SIZE;
+    
+    const [grid, setGrid] = useState([]);
+    const [path, setPath] = useState([]);
+    const [score, setScore] = useState(0);
+    const [combo, setCombo] = useState(0);
+    const [messages, setMessages] = useState([]);
+    
+    const [timeLeft, setTimeLeft] = useState(mode === 'time' ? 60 : (mode === 'mission' ? 90 : 0));
+    const [missionTarget, setMissionTarget] = useState(null);
+    const [bountyTarget, setBountyTarget] = useState(null); 
+    const [pushTimer, setPushTimer] = useState(4);
+    const [survivedTime, setSurvivedTime] = useState(0);
+    const pushIntervalRef = useRef(4);
+
+    const comboTimerRef = useRef(0);
+    const canvasRef = useRef(null);
+    const engineRef = useRef(null);
+    const boardRef = useRef(null);
+    const isGameOverRef = useRef(false);
+
+    const getRandomAtom = () => ATOM_POOL[Math.floor(Math.random() * ATOM_POOL.length)];
+    const getRandomMission = () => MOLECULES[Math.floor(Math.random() * MOLECULES.length)];
+
+    useEffect(() => {
+        let initial = [];
+        if (mode === 'survival') {
+            for(let i=0; i<TOTAL_CELLS; i++) initial.push(i >= TOTAL_CELLS/2 ? { id: Math.random(), sym: getRandomAtom() } : null);
+        } else {
+            for(let i=0; i<TOTAL_CELLS; i++) initial.push({ id: Math.random(), sym: getRandomAtom() });
+        }
+        setGrid(initial);
+        if (mode === 'mission') setMissionTarget(getRandomMission());
+
+        if(canvasRef.current) {
+            engineRef.current = new ParticleEngine(canvasRef.current);
+            engineRef.current.resize(); engineRef.current.start();
+            
+            const ro = new ResizeObserver(()=> { if(engineRef.current) engineRef.current.resize(); });
+            if(canvasRef.current.parentNode) ro.observe(canvasRef.current.parentNode);
+            return () => { if(engineRef.current) engineRef.current.stop(); ro.disconnect(); };
+        }
+    }, [mode]);
+
+    useEffect(() => {
+        if (mode === 'mission' || isGameOverRef.current) return;
+        
+        setBountyTarget(getRandomMission()); 
+        const bountyInterval = setInterval(() => {
+            if (!isGameOverRef.current) setBountyTarget(getRandomMission());
+        }, 15000);
+        
+        return () => clearInterval(bountyInterval);
+    }, [mode]);
+
+    useEffect(() => {
+        if (isGameOverRef.current) return;
+        const interval = setInterval(() => {
+            if (comboTimerRef.current > 0) {
+                comboTimerRef.current -= 0.1;
+                if (comboTimerRef.current <= 0) setCombo(0);
+            }
+
+            if (mode === 'time' || mode === 'mission') {
+                setTimeLeft(prev => {
+                    if(prev <= 0.1) {
+                        isGameOverRef.current = true;
+                        clearInterval(interval);
+                        setTimeout(() => onEnd(score), 300); 
+                        return 0;
+                    }
+                    return prev - 0.1;
+                });
+            } else if (mode === 'survival') {
+                setSurvivedTime(prev => prev + 0.1);
+                setPushTimer(prev => {
+                    if (prev <= 0.1) {
+                        triggerSurvivalPush();
+                        pushIntervalRef.current = Math.max(1.2, pushIntervalRef.current - 0.05);
+                        return pushIntervalRef.current;
+                    }
+                    return prev - 0.1;
+                });
+            }
+        }, 100);
+        return () => clearInterval(interval);
+    }, [mode, score, onEnd]);
+
+    const triggerSurvivalPush = useCallback(() => {
+        setGrid(prev => {
+            let overflow = false;
+            for(let c=0; c<GRID_SIZE; c++) if(prev[c] !== null) overflow = true;
+            
+            if (overflow) {
+                isGameOverRef.current = true;
+                setTimeout(() => onEnd(score), 100);
+                return prev;
+            }
+            
+            let next = [...prev];
+            for(let r=0; r<GRID_SIZE-1; r++) {
+               for(let c=0; c<GRID_SIZE; c++) next[r*GRID_SIZE+c] = next[(r+1)*GRID_SIZE+c];
+            }
+            for(let c=0; c<GRID_SIZE; c++) next[(GRID_SIZE-1)*GRID_SIZE+c] = { id: Math.random(), sym: getRandomAtom() };
+            return next;
+        });
+    }, [score, onEnd]);
+
+    const isAdjacent = (idx1, idx2) => {
+        if (idx1 === null || idx2 === null) return false;
+        const r1 = Math.floor(idx1 / GRID_SIZE), c1 = idx1 % GRID_SIZE;
+        const r2 = Math.floor(idx2 / GRID_SIZE), c2 = idx2 % GRID_SIZE;
+        return Math.abs(r1 - r2) <= 1 && Math.abs(c1 - c2) <= 1 && !(r1===r2 && c1===c2);
+    };
+
+    const handlePointerDown = (idx) => { if(!isGameOverRef.current && grid[idx]) setPath([idx]); };
+    
+    const handlePointerMove = (e) => {
+        if (path.length === 0 || isGameOverRef.current) return;
+        let clientX = e.clientX, clientY = e.clientY;
+        if (e.touches && e.touches.length > 0) { clientX = e.touches[0].clientX; clientY = e.touches[0].clientY; }
+        
+        const el = document.elementFromPoint(clientX, clientY);
+        if (!el) return;
+        
+        const idxStr = el.getAttribute('data-index');
+        if (idxStr !== null) {
+            const idx = parseInt(idxStr, 10);
+            if (!grid[idx]) return;
+            
+            const lastIdx = path[path.length - 1];
+            if (path.length > 1 && path[path.length - 2] === idx) {
+                setPath(prev => prev.slice(0, -1)); 
+            } else if (!path.includes(idx) && isAdjacent(lastIdx, idx)) {
+                setPath(prev => [...prev, idx]);
+            }
+        }
+    };
+
+    const handlePointerUp = () => {
+        if (path.length === 0 || isGameOverRef.current) return;
+        
+        const counts = {};
+        path.forEach(idx => { 
+            if(grid[idx]) counts[grid[idx].sym] = (counts[grid[idx].sym] || 0) + 1; 
+        });
+        
+        let matchedMol = null;
+        for (let mol of MOLECULES) {
+            const k1 = Object.keys(counts), k2 = Object.keys(mol.formula);
+            if (k1.length !== k2.length) continue;
+            let match = true;
+            for (let k of k1) { if (counts[k] !== mol.formula[k]) { match = false; break; } }
+            if (match) { matchedMol = mol; break; }
+        }
+
+        if (matchedMol) {
+            const lastIdx = path[path.length - 1];
+            let px = 0, py = 0;
+            
+            if(boardRef.current && grid[lastIdx]) {
+                const cell = boardRef.current.children[lastIdx].getBoundingClientRect();
+                const boardRect = boardRef.current.getBoundingClientRect();
+                px = cell.left + cell.width/2 - boardRect.left;
+                py = cell.top + cell.height/2 - boardRect.top;
+            }
+            
+            if (navigator.vibrate) navigator.vibrate(80);
+
+            const atomCount = Object.values(matchedMol.formula).reduce((a,b)=>a+b,0);
+            
+            let isMissionSuccess = (mode === 'mission' && matchedMol.id === missionTarget?.id);
+            let isBountySuccess = (mode !== 'mission' && matchedMol.id === bountyTarget?.id);
+
+            let multiplier = 1 + (combo * 0.15); 
+            if (isMissionSuccess) multiplier *= 2.0; 
+            if (isBountySuccess) multiplier *= 3.0;  
+
+            if (engineRef.current) {
+                const color = isBountySuccess ? '#fbbf24' : (ATOM_INFO[grid[lastIdx].sym]?.color || '#10b981');
+                engineRef.current.explode(px, py, color, isBountySuccess ? 50 : 35);
+            }
+
+            const earnedPts = Math.round((atomCount * 60) * multiplier);
+            setScore(s => s + earnedPts);
+            
+            setCombo(c => Math.min(c + 1, 10));
+            comboTimerRef.current = 5.0;
+
+            if (isMissionSuccess) {
+                setTimeLeft(t => Math.min(120, t + 6));
+                setMissionTarget(getRandomMission());
+            }
+
+            if (isBountySuccess) {
+                setBountyTarget(getRandomMission()); 
+            }
+
+            let msgText = isBountySuccess ? `🔥 <span class="text-amber-400">현상금 헌터!</span><br/>${matchedMol.name}` : matchedMol.name;
+
+            setMessages(prev => [...prev, { id: Date.now(), text: msgText, bonus: earnedPts, x: px, y: py }]);
+
+            setGrid(prevGrid => {
+                let newGrid = [...prevGrid];
+                path.forEach(idx => newGrid[idx] = null);
+                
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    let column = [];
+                    for (let r = 0; r < GRID_SIZE; r++) {
+                        if (newGrid[r * GRID_SIZE + c] !== null) column.push(newGrid[r * GRID_SIZE + c]);
+                    }
+                    if (mode !== 'survival') {
+                        while (column.length < GRID_SIZE) column.unshift({ id: Math.random(), sym: getRandomAtom() });
+                    } else {
+                        while (column.length < GRID_SIZE) column.unshift(null);
+                    }
+                    for (let r = 0; r < GRID_SIZE; r++) newGrid[r * GRID_SIZE + c] = column[r];
+                }
+                return newGrid;
+            });
+        }
+        setPath([]);
+    };
+
+    return (
+        <div className="flex flex-col h-full bg-slate-900 w-full" style={{ touchAction: 'none' }}>
+            <div className="pt-[max(12px,var(--safe-top))] px-4 py-3 bg-slate-800 border-b border-slate-700 flex flex-col gap-2 relative z-20">
+                <div className="flex justify-between items-start">
+                    <div>
+                        <div className="text-2xl font-black text-blue-400 leading-none">{score} <span className="text-sm font-bold">PTS</span></div>
+                        {combo > 0 && <div className="text-emerald-400 font-bold text-sm mt-1.5 animate-pulse-fast">{combo} COMBO! (x{(1+combo*0.15).toFixed(2)})</div>}
+                    </div>
+                    
+                    <div className="flex flex-col items-end gap-1.5">
+                        <button 
+                            onClick={() => { isGameOverRef.current = true; onEnd(score); }} 
+                            className="bg-red-500/20 text-red-400 hover:bg-red-500/40 border border-red-500/30 px-3 py-1 rounded-lg text-xs font-bold active:scale-95 transition-transform"
+                        >
+                            🛑 포기
+                        </button>
+                        {mode === 'survival' ? (
+                            <div className="text-right">
+                                <div className="text-xl font-black text-red-400 leading-none">☠️ {Math.floor(survivedTime)}s</div>
+                                <div className="w-24 h-1.5 bg-slate-700 rounded-full mt-1.5 overflow-hidden border border-slate-600">
+                                    <div className="h-full bg-red-500 transition-all duration-100" style={{ width: `${(pushTimer / pushIntervalRef.current) * 100}%` }}></div>
+                                </div>
+                            </div>
+                        ) : mode === 'zen' ? (
+                            <div className="text-emerald-400 font-bold text-sm bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">🧘 무한 탐구</div>
+                        ) : (
+                            <div className="text-2xl font-black text-red-400 leading-none">⏱ {Math.ceil(timeLeft)}s</div>
+                        )}
+                    </div>
+                </div>
+                
+                {mode === 'mission' && missionTarget && (
+                    <div className="bg-slate-900 border border-emerald-500/40 rounded-lg p-2.5 flex justify-between items-center shadow-lg shadow-emerald-500/10 animate-slidedown">
+                        <span className="text-emerald-400 text-xs font-bold animate-pulse">🎯 조립 주문서 (+6초)</span>
+                        <div className="flex items-center gap-2">
+                            <span className="font-bold text-lg text-white" dangerouslySetInnerHTML={{__html: missionTarget.formulaHtml}}></span>
+                            <span className="text-slate-400 text-xs">({missionTarget.name})</span>
+                        </div>
+                    </div>
+                )}
+
+                {/* 현상금(Bounty) 배너 */}
+                {mode !== 'mission' && bountyTarget && (
+                    <div className="bg-slate-900 border border-amber-500/50 rounded-lg p-2 flex justify-between items-center shadow-[0_0_10px_rgba(251,191,36,0.2)] animate-slidedown">
+                        <span className="text-amber-400 text-xs font-bold animate-pulse px-2">✨ 추천 조립 (점수 3배)</span>
+                        <div className="flex items-center gap-2 pr-2">
+                            <span className="font-bold text-lg text-white" dangerouslySetInnerHTML={{__html: bountyTarget.formulaHtml}}></span>
+                            <span className="text-slate-400 text-xs">({bountyTarget.name})</span>
+                        </div>
+                    </div>
+                )}
+            </div>
+            
+            <div className="flex-1 flex flex-col items-center justify-center p-4 relative overflow-hidden"
+                 onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerUp}
+                 onTouchMove={handlePointerMove} onTouchEnd={handlePointerUp}>
+                
+                <div className="text-slate-400 mb-4 text-center text-xs absolute top-4">
+                    {mode === 'survival' 
+                        ? '💥 바닥에서 차오릅니다! 닿기전에 터뜨리세요!' 
+                        : mode === 'zen' 
+                            ? '편안하게 여러 분자를 자유롭게 조합하세요.'
+                            : '드래그로 원소를 묶어 완벽한 분자식을 조립하세요.'}
+                </div>
+                
+                <div ref={boardRef} className="relative w-full max-w-[360px] aspect-square bg-slate-800/90 rounded-2xl p-2.5 grid grid-cols-6 grid-rows-6 gap-1.5 shadow-2xl border border-slate-700">
+                    <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none z-10" />
+                    
+                    {grid.map((cell, idx) => {
+                        const isSelected = path.includes(idx);
+                        const safeColor = cell && ATOM_INFO[cell.sym] ? ATOM_INFO[cell.sym].color : 'transparent';
+                        const safeText = cell && ATOM_INFO[cell.sym] ? ATOM_INFO[cell.sym].text : 'transparent';
+                        return (
+                            <div 
+                                key={cell?.id || idx} 
+                                data-index={idx}
+                                onPointerDown={() => handlePointerDown(idx)}
+                                onTouchStart={() => handlePointerDown(idx)}
+                                className={`w-full h-full rounded-full flex items-center justify-center font-black text-lg transition-all duration-75 select-none cursor-pointer
+                                    ${isSelected ? 'scale-90 ring-4 ring-emerald-400 z-20 shadow-[0_0_15px_rgba(52,211,100,0.6)]' : ''}
+                                    ${cell ? 'shadow-md border-b-4 border-black/30 active:scale-95' : 'opacity-10'}`}
+                                style={{ backgroundColor: safeColor, color: safeText }}
+                            >
+                                {cell?.sym}
+                            </div>
+                        )
+                    })}
+                    
+                    {messages.map(msg => (
+                        <FloatingMessage key={msg.id} message={msg} onComplete={() => setMessages(m => m.filter(x => x.id !== msg.id))} />
+                    ))}
+                </div>
+                
+                <div className="absolute bottom-6 w-full max-w-[360px] px-4">
+                     <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                         <div className="h-full bg-emerald-400 transition-all duration-100" style={{width: `${(comboTimerRef.current / 5.0) * 100}%`}}></div>
+                     </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// ==========================================
+// 공통 & 부가 뷰 (명예의 전당, 인트로, 보고서, 도감 모달)
+// ==========================================
+
+// --- Google Sheets 기반 실시간 랭킹 시스템 ---
+const Leaderboard = () => {
+    const [leaders, setLeaders] = useState([]);
+    const [selectedTab, setSelectedTab] = useState('타임어택'); 
+    const [isLoading, setIsLoading] = useState(false);
+    const [errorMsg, setErrorMsg] = useState('');
+
+    const fetchLeaderboard = useCallback(async () => {
+        if (!GOOGLE_SCRIPT_URL) {
+            setErrorMsg("구글 시트 연동 URL이 설정되지 않았습니다.");
+            return;
+        }
+        setIsLoading(true);
+        setErrorMsg('');
+        try {
+            // 구글 앱스 스크립트에서 데이터 가져오기 (캐싱 방지)
+            const res = await fetch(GOOGLE_SCRIPT_URL + "?t=" + Date.now());
+            const rawData = await res.json();
+            
+            // '점수' 유형만 필터링 후 맵핑
+            const scores = rawData.filter(d => d['유형'] === '점수');
+            const mapped = scores.map(d => ({
+                studentId: d['학번'],
+                studentName: d['이름'],
+                mode: d['모드'],
+                score: Number(d['점수']) || 0
+            }));
+            setLeaders(mapped);
+        } catch (e) {
+            console.error("Sheet Fetch Error:", e);
+            setErrorMsg("명예의 전당 로드 실패. URL을 확인하세요.");
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchLeaderboard();
+    }, [fetchLeaderboard]);
+
+    const filteredLeaders = useMemo(() => {
+        return leaders.filter(l => l.mode === selectedTab).sort((a, b) => b.score - a.score).slice(0, 10);
+    }, [leaders, selectedTab]);
+
+    return (
+        <div className="glass-panel rounded-2xl p-4 w-full max-w-md mx-auto mb-6 relative">
+            <div className="flex justify-between items-center mb-3">
+                <div className="w-8"></div>
+                <h3 className="text-lg font-black text-center text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-400 flex items-center gap-1.5">
+                    👑 명예의 전당 Top 10 👑
+                </h3>
+                <button onClick={fetchLeaderboard} className="text-slate-400 hover:text-white transition w-8 text-lg active:scale-95" title="새로고침">
+                    🔄
+                </button>
+            </div>
+            
+            <div className="flex bg-slate-900/60 p-1 rounded-xl mb-3 border border-slate-800 gap-1">
+                {['타임어택', '오더미션', '서바이벌'].map(tab => (
+                    <button key={tab} onClick={() => setSelectedTab(tab)}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedTab === tab ? 'bg-amber-500 text-slate-900 shadow-md scale-105' : 'text-slate-400 hover:text-slate-200'}`}>
+                        {tab}
+                    </button>
+                ))}
+            </div>
+
+            {isLoading ? (
+                <div className="flex flex-col items-center justify-center py-8 text-slate-400">
+                    <div className="w-6 h-6 border-2 border-amber-400 border-t-transparent rounded-full animate-spin-slow mb-2"></div>
+                    <span className="text-xs">데이터 로딩 중...</span>
+                </div>
+            ) : errorMsg ? (
+                <div className="text-center text-red-400 text-xs py-4">{errorMsg}</div>
+            ) : filteredLeaders.length === 0 ? (
+                <div className="text-center text-slate-400 text-xs py-4 leading-relaxed">아직 등록된 기록이 없습니다.<br/>지금 가장 먼저 기록을 세워보세요!</div>
+            ) : (
+                <div className="space-y-1.5 max-h-[190px] overflow-y-auto scrollable-panel">
+                    {filteredLeaders.map((l, i) => (
+                        <div key={i} className={`flex justify-between items-center p-2 rounded-lg text-xs ${i===0?'bg-yellow-500/15 border border-yellow-500/30': i===1?'bg-slate-300/10': i===2?'bg-orange-700/20':'bg-slate-800/40'}`}>
+                            <div className="flex items-center gap-2">
+                                <span className={`font-black w-4 text-center ${i===0?'text-yellow-400':i===1?'text-slate-300':i===2?'text-orange-400':'text-slate-500'}`}>{i+1}</span>
+                                <span className="font-bold text-white">{l.studentName} <span className="text-[10px] text-slate-400 font-normal">({l.studentId})</span></span>
+                            </div>
+                            <span className="font-black text-amber-400">{l.score.toLocaleString()}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
+// --- 분자 도감 모달 컴포넌트 ---
+const DictionaryModal = ({ isOpen, onClose }) => {
+    const sortedMolecules = useMemo(() => {
+        return [...MOLECULES].map(mol => {
+            const atomCount = Object.values(mol.formula).reduce((a, b) => a + b, 0);
+            return { ...mol, baseScore: atomCount * 60, atomCount };
+        }).sort((a, b) => b.baseScore - a.baseScore);
+    }, []);
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title="📘 분자 조립 도감 (레시피)">
+            <p className="text-xs text-slate-400 mb-4 bg-slate-900/50 p-2 rounded text-center">
+                어려운 분자를 연결할수록 획득 점수가 크게 증가합니다!<br/>
+                <span className="text-amber-400 font-bold">※ 게임 중 현상금이 걸린 분자는 점수 3배 적용!</span>
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-2">
+                {sortedMolecules.map(mol => (
+                    <div key={mol.id} className="bg-slate-800/80 border border-slate-700 rounded-xl p-3 flex flex-col justify-between hover:bg-slate-700/80 transition">
+                        <div className="flex justify-between items-start mb-2">
+                            <div>
+                                <div className="text-lg font-black text-white" dangerouslySetInnerHTML={{__html: mol.formulaHtml}}></div>
+                                <div className="text-xs text-slate-400">{mol.name}</div>
+                            </div>
+                            <div className="text-amber-400 font-bold text-sm bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                                {mol.baseScore}점
+                            </div>
+                        </div>
+                        <div className="flex gap-1 flex-wrap">
+                            {Object.entries(mol.formula).map(([atom, count]) => (
+                                <span key={atom} className="text-[10px] px-1.5 py-0.5 bg-slate-900 text-slate-300 border border-slate-600 rounded flex items-center">
+                                    <span style={{ color: ATOM_INFO[atom].color, fontWeight: 'bold', marginRight: '3px' }}>{atom}</span> x {count}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </Modal>
+    );
+};
+
+const IntroView = ({ onSelectMode, onOpenReport, onOpenGuide }) => {
+    const [isDictOpen, setIsDictOpen] = useState(false);
+
+    return (
+        <div className="flex flex-col items-center h-full p-4 text-center scrollable-panel pt-[max(16px,var(--safe-top))] pb-[max(16px,var(--safe-bottom))] h-screen-safe">
+            <div className="w-full max-w-md mb-4">
+                <button onClick={onOpenReport} className="w-full bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 border border-emerald-500/30 py-3 px-2 rounded-xl text-sm font-black transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/5 animate-pulse-fast">
+                    📝 최종 보고서 (수업 종료 시 제출)
+                </button>
+            </div>
+
+            <div className="mb-4 relative w-full max-w-md">
+                <h1 className="text-3xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400 leading-tight mb-2">
+                    분자 퍼즐 마스터
+                </h1>
+                
+                <button onClick={() => setIsDictOpen(true)} className="mx-auto bg-blue-500 hover:bg-blue-400 text-white border border-blue-400 py-1.5 px-4 rounded-full text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1 shadow-lg shadow-blue-500/30">
+                    📘 분자 조립 도감 (레시피) 보기
+                </button>
+            </div>
+
+            <Leaderboard />
+
+            <div className="w-full max-w-md space-y-2.5">
+                <button onClick={()=>onSelectMode('time')} className="w-full glass-panel rounded-xl p-3.5 flex items-center gap-4 text-left hover:bg-slate-700/40 transition active:scale-95 border-l-4 border-l-blue-400">
+                    <div className="text-2xl">⏱️</div>
+                    <div><h3 className="text-sm font-bold text-white">타임 어택 (60초)</h3><p className="text-[11px] text-slate-400 mt-0.5">제한시간 내 빠른 조립으로 콤보를 누적하세요!</p></div>
+                </button>
+                <button onClick={()=>onSelectMode('mission')} className="w-full glass-panel rounded-xl p-3.5 flex items-center gap-4 text-left hover:bg-slate-700/40 transition active:scale-95 border-l-4 border-l-emerald-400">
+                    <div className="text-2xl">🎯</div>
+                    <div><h3 className="text-sm font-bold text-white">오더 미션 (주문 해결)</h3><p className="text-[11px] text-slate-400 mt-0.5">상단 오더를 완수하고 제한시간을 연장 시키세요!</p></div>
+                </button>
+                <button onClick={()=>onSelectMode('survival')} className="w-full glass-panel rounded-xl p-3.5 flex items-center gap-4 text-left hover:bg-slate-700/40 transition active:scale-95 border-l-4 border-l-red-500">
+                    <div className="text-2xl">☠️</div>
+                    <div><h3 className="text-sm font-bold text-white">데스매치 (서바이벌)</h3><p className="text-[11px] text-slate-400 mt-0.5">바닥에서 차오르는 위기를 연쇄 조립으로 막으세요!</p></div>
+                </button>
+                <button onClick={()=>onSelectMode('zen')} className="w-full glass-panel rounded-xl p-3.5 flex items-center gap-4 text-left hover:bg-slate-700/40 transition active:scale-95 border-l-4 border-l-purple-500">
+                    <div className="text-2xl">🧘</div>
+                    <div><h3 className="text-sm font-bold text-white">무한 탐구 (연습 모드)</h3><p className="text-[11px] text-slate-400 mt-0.5">게임오버 걱정 없이 분자 합성을 자율 관찰하세요!</p></div>
+                </button>
+            </div>
+            
+            <div className="mt-8 text-slate-500 font-mono text-[10px]">Created by Yang DH</div>
+            <DictionaryModal isOpen={isDictOpen} onClose={() => setIsDictOpen(false)} />
+        </div>
+    );
+};
+
+// --- 구글 시트 점수 전송 뷰 ---
+const ResultView = ({ gameData, onSubmit }) => {
+    const [formData, setFormData] = useState({ studentId: '', studentName: '' });
+    const [showError, setShowError] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const handleLeaderboardSubmit = async () => {
+        if (!formData.studentId || !formData.studentName) { setShowError('학번과 이름을 올바르게 입력해주세요.'); return; }
+        if (!GOOGLE_SCRIPT_URL) { setShowError('구글 시트 연동 URL이 설정되지 않았습니다.'); return; }
+        
+        setIsSubmitting(true);
+        const modeStr = gameData.mode === 'time' ? '타임어택' : (gameData.mode === 'mission' ? '오더미션' : '서바이벌');
+
+        const payload = {
+            type: '점수',
+            timestamp: new Date().toLocaleString(),
+            studentId: formData.studentId,
+            studentName: formData.studentName,
+            mode: modeStr,
+            score: gameData.score
+        };
+
+        try {
+            await fetch(GOOGLE_SCRIPT_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify(payload)
+            });
+            onSubmit(); // no-cors 특성상 성공 즉시 이동
+        } catch (err) {
+            console.error("Sheet submit error", err);
+            setShowError("서버 전송 중 오류가 발생했습니다.");
+            setIsSubmitting(false);
+        }
+    };
+
+    return (
+        <div className="flex flex-col h-full h-screen-safe bg-slate-900 justify-center p-6 text-center">
+            <div className="max-w-md w-full mx-auto space-y-6 animate-pop">
+                <div className="text-5xl">🏆</div>
+                <div>
+                    <h2 className="text-3xl font-black text-white">게임 종료!</h2>
+                    <p className="text-slate-400 text-sm mt-1">점수를 자랑스럽게 기입하세요!</p>
+                </div>
+
+                <div className="bg-slate-800 rounded-3xl p-6 border border-slate-700 shadow-xl space-y-4">
+                    <div>
+                        <div className="text-xs text-slate-400 mb-0.5">최종 점수</div>
+                        <div className="text-4xl font-black text-amber-400">{gameData.score.toLocaleString()} <span className="text-lg">점</span></div>
+                    </div>
+
+                    {gameData.mode !== 'zen' ? (
+                        <div className="space-y-3 pt-2 text-left">
+                            <div className="flex gap-2">
+                                <input type="text" placeholder="학번" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm outline-none focus:border-amber-500" value={formData.studentId} onChange={e => setFormData({...formData, studentId: e.target.value})} />
+                                <input type="text" placeholder="이름" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm outline-none focus:border-amber-500" value={formData.studentName} onChange={e => setFormData({...formData, studentName: e.target.value})} />
+                            </div>
+                            <Button onClick={handleLeaderboardSubmit} className="w-full py-3.5 text-md" disabled={isSubmitting}>{isSubmitting ? '등록 중...' : '🏆 명예의 전당 기록 등록하기'}</Button>
+                        </div>
+                    ) : (
+                        <div className="bg-slate-900/60 p-4 rounded-xl text-xs text-slate-400 leading-relaxed">
+                            💡 무한 탐구(연습 모드)는 명예의 전당 등록이 불가합니다.
+                        </div>
+                    )}
+                </div>
+                <button onClick={onSubmit} className="text-slate-400 hover:text-white font-bold text-sm underline active:scale-95 transition-transform block mx-auto">등록 없이 메인으로 나가기</button>
+            </div>
+            <Modal isOpen={!!showError} onClose={()=>setShowError('')} title="오류 알림"><p>{showError}</p></Modal>
+        </div>
+    );
+};
+
+// --- 구글 시트 보고서 전송 뷰 ---
+const FinalReportView = ({ onBack }) => {
+    const [answers, setAnswers] = useState({});
+    const [formData, setFormData] = useState({ studentId: '', studentName: '', insight: '' });
+    const [showError, setShowError] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [quizQuestions, setQuizQuestions] = useState([]);
+
+    useEffect(() => setQuizQuestions([...QUIZ_POOL].sort(() => 0.5 - Math.random()).slice(0, 3)), []);
+
+    const handleReportSubmit = async () => {
+        if (!formData.studentId || !formData.studentName || !formData.insight) { setShowError('모든 정보를 빠짐없이 입력하세요.'); return; }
+        if (Object.keys(answers).length < 3) { setShowError('퀴즈 3문항을 모두 제출하세요.'); return; }
+        if (!GOOGLE_SCRIPT_URL) { setShowError('구글 시트 연동 URL이 설정되지 않았습니다.'); return; }
+        
+        setIsSubmitting(true);
+        let quizScore = Math.round(Object.keys(answers).reduce((acc, i) => acc + (answers[i] === quizQuestions[i].a ? 33.3 : 0), 0));
+
+        const payload = { 
+            type: '보고서',
+            timestamp: new Date().toLocaleString(), 
+            studentId: formData.studentId,
+            studentName: formData.studentName,
+            quizScore, 
+            insight: formData.insight 
+        };
+
+        try {
+            await fetch(GOOGLE_SCRIPT_URL, { 
+                method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, 
+                body: JSON.stringify(payload)
+            });
+            onBack();
+        } catch (error) {
+            setShowError('제출 실패. 네트워크 오류입니다.');
+            setIsSubmitting(false);
+        }
+    };
+
+    return (
+        <div className="flex flex-col h-full h-screen-safe bg-slate-900 scrollable-panel pt-[max(16px,var(--safe-top))] pb-[max(16px,var(--safe-bottom))] px-4">
+            <div className="max-w-md w-full mx-auto space-y-5">
+                <div className="flex justify-between items-center">
+                    <button onClick={onBack} className="text-slate-400 hover:text-white font-bold text-sm">← 메인 화면</button>
+                    <h2 className="text-xl font-black text-white">📝 수업 최종 보고서</h2>
+                    <div className="w-10"></div>
+                </div>
+
+                <div className="glass-panel rounded-2xl p-4 flex gap-3">
+                    <div className="flex-1"><input type="text" placeholder="학번 (예: 20202)" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm outline-none focus:border-emerald-500" value={formData.studentId} onChange={e => setFormData({...formData, studentId: e.target.value})} /></div>
+                    <div className="flex-1"><input type="text" placeholder="이름" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm outline-none focus:border-emerald-500" value={formData.studentName} onChange={e => setFormData({...formData, studentName: e.target.value})} /></div>
+                </div>
+
+                <div className="space-y-3">
+                    <h3 className="font-bold text-emerald-400 text-sm">🔬 미니 확인 테스트</h3>
+                    {quizQuestions.map((q, i) => (
+                        <div key={i} className="glass-panel rounded-xl p-4">
+                            <p className="text-slate-200 text-xs leading-relaxed mb-3">Q{i+1}. {q.q}</p>
+                            <div className="flex gap-2">
+                                <button onClick={() => answers[i]===undefined && setAnswers({...answers, [i]:true})} className={`flex-1 py-1.5 rounded-lg text-sm font-bold transition-all ${answers[i]===true?'bg-emerald-600 text-white scale-105':'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}>O</button>
+                                <button onClick={() => answers[i]===undefined && setAnswers({...answers, [i]:false})} className={`flex-1 py-1.5 rounded-lg text-sm font-bold transition-all ${answers[i]===false?'bg-red-600 text-white scale-105':'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}>X</button>
+                            </div>
+                            {answers[i]!==undefined && (
+                                <div className={`text-[11px] mt-2.5 p-2 rounded-lg ${answers[i]===q.a?'bg-emerald-500/10 text-emerald-300':'bg-red-500/10 text-red-300'}`}>
+                                    <span className="font-bold">{answers[i]===q.a?'정답! ':'오답! '}</span>{q.explain}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+
+                <div className="glass-panel rounded-xl p-4">
+                    <label className="block text-xs font-bold text-emerald-400 mb-1.5">💡 수업 정리 및 성찰 작성</label>
+                    <textarea className="w-full h-24 bg-slate-900 border border-slate-700 rounded-lg p-3 text-xs text-white resize-none outline-none focus:border-emerald-500 leading-relaxed" placeholder="새롭게 배운 지식이나 과학적 성찰을 기입하세요." value={formData.insight} onChange={e => setFormData({...formData, insight: e.target.value})}></textarea>
+                </div>
+                <Button onClick={handleReportSubmit} className="w-full py-4 text-md" variant="emerald" disabled={isSubmitting}>{isSubmitting ? '서버 전송 중...' : '✔️ 최종 제출하기 (구글 시트)'}</Button>
+            </div>
+            <Modal isOpen={!!showError} onClose={()=>setShowError('')} title="알림"><p>{showError}</p></Modal>
+        </div>
+    );
+};
+
+// --- 교사용 시트 연동 코드 (doGet, doPost 포함) ---
+const AdminGuideModal = ({ isOpen, onClose }) => {
+    const [copied, setCopied] = useState(false);
+    if(!isOpen) return null;
+    
+    const code = `function doGet(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  if (sheet.getLastRow() === 0) return ContentService.createTextOutput("[]").setMimeType(ContentService.MimeType.JSON);
+  
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var result = [];
+  for (var i = 1; i < data.length; i++) {
+    var obj = {};
+    for (var j = 0; j < headers.length; j++) {
+      obj[headers[j]] = data[i][j];
+    }
+    result.push(obj);
+  }
+  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(['유형', '제출시간', '학번', '이름', '모드', '점수', '퀴즈점수', '알게된점']);
+    sheet.getRange(1, 1, 1, sheet.getLastColumn()).setFontWeight('bold').setBackground('#4a86e8').setFontColor('#ffffff');
+  }
+  var data = JSON.parse(e.postData.contents);
+  sheet.appendRow([
+    data.type || '점수',
+    data.timestamp || '',
+    data.studentId || '',
+    data.studentName || '',
+    data.mode || '',
+    data.score || 0,
+    data.quizScore || 0,
+    data.insight || ''
+  ]);
+  return ContentService.createTextOutput(JSON.stringify({ result: 'success' })).setMimeType(ContentService.MimeType.JSON);
+}`;
+
+    const handleCopy = () => {
+        try {
+            const ta = document.createElement('textarea'); ta.value = code; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+            setCopied(true); setTimeout(() => setCopied(false), 2000);
+        } catch (err) {}
+    };
+
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <div className="bg-slate-800 rounded-2xl p-5 w-full max-w-md max-h-[90dvh] overflow-y-auto scrollable-panel">
+                <h2 className="text-lg font-black mb-4">⚙️ 교사용 스마트 시트 연동 가이드</h2>
+                <ol className="list-decimal pl-4 text-xs space-y-2 mb-4 text-slate-300">
+                    <li>새 구글 스프레드시트 생성 후 [확장 프로그램] &gt; [Apps Script] 진입</li>
+                    <li>기존 코드 삭제 후 아래 코드를 복사하여 붙여넣습니다. (조회와 저장을 모두 처리합니다)</li>
+                </ol>
+                <div className="relative mb-4">
+                    <pre className="bg-slate-900 p-3 rounded-lg text-[10px] overflow-x-auto text-green-400 border border-slate-700 font-mono"><code>{code}</code></pre>
+                    <button onClick={handleCopy} className="absolute top-2 right-2 bg-slate-700 text-[10px] px-2 py-1 rounded text-white">{copied ? '✅ 복사 완료' : '📋 복사'}</button>
+                </div>
+                <ol className="list-decimal pl-4 text-xs space-y-2 mb-6 text-slate-300" start="3">
+                    <li>Apps Script [새 배포] &gt; [웹 앱], 액세스 권한을 <b>'모든 사용자(Anyone)'</b>로 배포</li>
+                    <li>부여받은 배포 주소(URL)를 이 소스코드 상단 <code className="bg-slate-900 text-amber-400 px-1 py-0.5 rounded">GOOGLE_SCRIPT_URL</code>에 입력하세요.</li>
+                </ol>
+                <Button onClick={onClose} className="w-full text-sm py-2.5" variant="secondary">가이드 닫기</Button>
+            </div>
+        </div>
+    );
+};
+
+// ==========================================
+// App 라우팅 (Firebase 제거됨)
+// ==========================================
+const App = () => {
+    const [view, setView] = useState('intro');
+    const [gameData, setGameData] = useState(null);
+    const [isGuideOpen, setIsGuideOpen] = useState(false);
+
+    const navigate = (v) => { setView(v); history.pushState({view:v}, ''); };
+
+    useEffect(() => {
+        history.replaceState({view:'intro'}, '');
+        const onPop = (e) => setView(e.state?.view || 'intro');
+        window.addEventListener('popstate', onPop);
+        return () => window.removeEventListener('popstate', onPop);
+    }, []);
+
+    return (
+        <div className="relative w-full h-screen-safe overflow-hidden font-sans text-slate-50 bg-slate-900">
+            {/* 우측 상단 고정: 교사 가이드 버튼 */}
+            {view === 'intro' && (
+                <div className="absolute top-[max(16px,var(--safe-top))] right-4 z-50">
+                    <button 
+                        onClick={() => setIsGuideOpen(true)} 
+                        className="bg-slate-800/90 backdrop-blur border border-slate-600 text-slate-200 px-3 py-1.5 rounded-full text-xs font-bold shadow-lg hover:bg-slate-700 transition active:scale-95"
+                    >
+                        ⚙️ DB 연동 가이드
+                    </button>
+                </div>
+            )}
+            
+            <div className="w-full h-full">
+                {view === 'intro' && <IntroView onSelectMode={(mode) => navigate(mode)} onOpenReport={() => navigate('report')} />}
+                {(view === 'time' || view === 'mission' || view === 'survival' || view === 'zen') && <HexaConnectGame mode={view} onEnd={(s) => { setGameData({ score: s, mode: view }); navigate('result'); }} />}
+                {view === 'result' && <ResultView gameData={gameData} onSubmit={() => navigate('intro')} />}
+                {view === 'report' && <FinalReportView onBack={() => navigate('intro')} />}
+            </div>
+            <AdminGuideModal isOpen={isGuideOpen} onClose={() => setIsGuideOpen(false)} />
+        </div>
+    );
+};
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
