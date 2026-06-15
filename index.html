@@ -202,7 +202,7 @@ const FloatingMessage = ({ message, onComplete }) => {
 };
 
 // ==========================================
-// 메인 게임 엔진 (한붓그리기 - 터치/마우스 완전 최적화 버젼)
+// 메인 게임 엔진 (진짜 벌집 Hexagon 배열 적용)
 // ==========================================
 const HexaConnectGame = ({ mode, onEnd }) => {
     const GRID_SIZE = 6;
@@ -221,6 +221,8 @@ const HexaConnectGame = ({ mode, onEnd }) => {
     const [pushTimer, setPushTimer] = useState(4);
     const [survivedTime, setSurvivedTime] = useState(0);
     
+    const [forceRender, setForceRender] = useState(0); // 렌더링 강제 업데이트용
+
     const pushIntervalRef = useRef(4);
     const comboTimerRef = useRef(0);
     const canvasRef = useRef(null);
@@ -240,56 +242,69 @@ const HexaConnectGame = ({ mode, onEnd }) => {
         return () => { if (boardEl) boardEl.removeEventListener('touchmove', preventTouchScroll); }
     }, []);
 
-    // 1. 단 한번 수학적으로 그리드 좌표를 싹 계산해서 캐싱 (엄청난 성능 향상)
+    // 1. 단 한번 수학적으로 그리드 좌표를 싹 계산해서 캐싱 (벌집 지그재그 배열)
     const updateCellBounds = useCallback(() => {
         if (!boardRef.current) return;
         const rect = boardRef.current.getBoundingClientRect();
-        // Tailwind 설정과 동일한 여백/간격
-        const padding = 10; // p-2.5 = 10px
-        const gap = 6;      // gap-1.5 = 6px
         
-        const availableWidth = rect.width - (padding * 2) - (gap * 5);
-        const cellW = availableWidth / 6;
-        const cellH = cellW;
+        const padding = 12; 
+        const gap = 8;
+        
+        // 6 columns + 5 gaps + 0.5 column shift (for odd rows to create hex pattern)
+        const availableWidth = rect.width - (padding * 2);
+        const cellW = (availableWidth - 5 * gap) / 6.5; 
+        const cellH = cellW; // perfect circle
         
         const bounds = [];
-        for (let r = 0; r < 6; r++) {
-            for (let c = 0; c < 6; c++) {
-                const cx = rect.left + padding + c * (cellW + gap) + cellW / 2;
-                const cy = rect.top + padding + r * (cellH + gap) + cellH / 2;
-                bounds.push({ idx: r * 6 + c, cx, cy, r: cellW / 2 });
+        for (let r = 0; r < GRID_SIZE; r++) {
+            for (let c = 0; c < GRID_SIZE; c++) {
+                // 홀수 줄은 오른쪽으로 반 칸씩 밀어 벌집 형태로 엇갈리게 만듭니다.
+                const xOffset = (r % 2 === 1) ? (cellW + gap) / 2 : 0;
+                const left = padding + c * (cellW + gap) + xOffset;
+                
+                // 원형 블록들이 위아래로 깊숙이 맞물리도록 간격을 좁힙니다 (0.88 배율)
+                const top = padding + r * (cellH + gap) * 0.88; 
+                
+                // 중심 좌표 계산 (SVG 라인 및 파티클 기준점)
+                const cx = left + cellW / 2;
+                const cy = top + cellH / 2;
+                
+                bounds.push({ idx: r * GRID_SIZE + c, cx, cy, r: cellW / 2, left, top, w: cellW, h: cellH });
             }
         }
         cellBoundsRef.current = bounds;
+        
+        // 전체 높이를 동적으로 설정
+        const totalH = padding * 2 + (GRID_SIZE - 1) * (cellH + gap) * 0.88 + cellH;
+        boardRef.current.style.height = `${totalH}px`;
+        
+        // UI 위치 업데이트를 위한 렌더링 강제
+        setForceRender(prev => prev + 1);
     }, []);
 
-    // 화면 리사이즈나 로드 시 좌표 업데이트
+    // 화면 리사이즈 시 좌표 재계산
     useEffect(() => {
         updateCellBounds();
-        const timerId = setTimeout(updateCellBounds, 200); // 렌더링 완료 후 안전빵
+        const timerId = setTimeout(updateCellBounds, 100); 
         window.addEventListener('resize', updateCellBounds);
         return () => {
             clearTimeout(timerId);
             window.removeEventListener('resize', updateCellBounds);
         };
-    }, [updateCellBounds, grid]); // grid가 바뀔때마다(게임 진행중) 해도 bounds는 동일하므로 안전
+    }, [updateCellBounds, grid]); 
 
-    // 2. SVG 라인도 수학적 캐싱 데이터로 그려서 레이아웃 트래싱(버벅임) 완벽 제거
+    // 2. SVG 라인 좌표 업데이트 (수학적 캐싱 데이터 활용)
     useEffect(() => {
         if (!boardRef.current || path.length === 0 || cellBoundsRef.current.length === 0) {
             setLines([]);
             return;
         }
-        const boardRect = boardRef.current.getBoundingClientRect();
         const newLines = path.map(idx => {
             const cell = cellBoundsRef.current[idx];
-            return {
-                x: cell.cx - boardRect.left,
-                y: cell.cy - boardRect.top
-            };
+            return { x: cell.cx, y: cell.cy }; // 보드 내 절대 좌표 사용
         });
         setLines(newLines);
-    }, [path]);
+    }, [path, forceRender]);
 
     useEffect(() => {
         let initial = [];
@@ -371,22 +386,44 @@ const HexaConnectGame = ({ mode, onEnd }) => {
         });
     }, [score, onEnd]);
 
+    // Hexagon(지그재그) 전용 인접 판별 알고리즘
     const isAdjacent = (idx1, idx2) => {
         if (idx1 === null || idx2 === null) return false;
         const r1 = Math.floor(idx1 / GRID_SIZE), c1 = idx1 % GRID_SIZE;
         const r2 = Math.floor(idx2 / GRID_SIZE), c2 = idx2 % GRID_SIZE;
-        return Math.abs(r1 - r2) <= 1 && Math.abs(c1 - c2) <= 1 && !(r1===r2 && c1===c2);
+        
+        // 같은 가로줄일 경우 좌우 1칸 차이
+        if (r1 === r2) return Math.abs(c1 - c2) === 1;
+        
+        // 바로 위나 아래 줄일 경우
+        if (Math.abs(r1 - r2) === 1) {
+            if (r1 % 2 === 0) {
+                // 현재가 짝수 줄(왼쪽 쏠림)일 때: 위/아래 줄은 나보다 오른쪽으로 밀려있음
+                return c2 === c1 || c2 === c1 - 1;
+            } else {
+                // 현재가 홀수 줄(오른쪽 쏠림)일 때: 위/아래 줄은 나보다 왼쪽으로 밀려있음
+                return c2 === c1 || c2 === c1 + 1;
+            }
+        }
+        return false;
     };
 
-    // 3. 거리 기반 정밀 터치 알고리즘 (대각선 간섭 무시)
+    // 3. 거리 기반 무한 정밀 터치 알고리즘 (빈틈 데드존 완벽 제거)
     const getIndexFromPointer = (clientX, clientY) => {
+        if (!boardRef.current) return null;
+        const rect = boardRef.current.getBoundingClientRect();
+        
         let closestIdx = null;
         let minDist = Infinity;
+        
         for (let i = 0; i < cellBoundsRef.current.length; i++) {
             const cell = cellBoundsRef.current[i];
-            const dist = Math.hypot(clientX - cell.cx, clientY - cell.cy);
-            // 반지름의 1.5배까지 판정 허용하여 대각선 드래그 시 빈틈에 씹히는 문제 완벽 해결
-            if (dist < cell.r * 1.5 && dist < minDist) {
+            const absCx = rect.left + cell.cx;
+            const absCy = rect.top + cell.cy;
+            const dist = Math.hypot(clientX - absCx, clientY - absCy);
+            
+            // 반지름의 1.3배 거리까지 자석처럼 인식 (대각선 간섭 완벽 무시)
+            if (dist < cell.r * 1.3 && dist < minDist) {
                 minDist = dist;
                 closestIdx = cell.idx;
             }
@@ -394,10 +431,8 @@ const HexaConnectGame = ({ mode, onEnd }) => {
         return closestIdx;
     };
 
-    // 통합 포인터 이벤트 핸들러들
     const handlePointerDown = (e) => {
         if (isGameOverRef.current) return;
-        // React에서 모바일 터치 취소(PointerCancel)를 막기 위해 캡처 강제
         if(e.target.hasPointerCapture(e.pointerId)) e.target.releasePointerCapture(e.pointerId);
         
         const idx = getIndexFromPointer(e.clientX, e.clientY);
@@ -414,9 +449,11 @@ const HexaConnectGame = ({ mode, onEnd }) => {
         if (idx !== null && grid[idx]) {
             const lastIdx = path[path.length - 1];
             if (path.length > 1 && path[path.length - 2] === idx) {
+                // 뒤로 드래그 시 취소 (스마트 취소)
                 setPath(prev => prev.slice(0, -1)); 
                 if (navigator.vibrate) navigator.vibrate(15);
             } else if (!path.includes(idx) && isAdjacent(lastIdx, idx)) {
+                // 새로운 인접 셀 연결
                 setPath(prev => [...prev, idx]);
                 if (navigator.vibrate) navigator.vibrate(15);
             }
@@ -444,14 +481,13 @@ const HexaConnectGame = ({ mode, onEnd }) => {
             const lastIdx = path[path.length - 1];
             let px = 0, py = 0;
             
-            if(boardRef.current && cellBoundsRef.current[lastIdx]) {
-                const boardRect = boardRef.current.getBoundingClientRect();
+            if(cellBoundsRef.current[lastIdx]) {
                 const cell = cellBoundsRef.current[lastIdx];
-                px = cell.cx - boardRect.left;
-                py = cell.cy - boardRect.top;
+                px = cell.cx;
+                py = cell.cy;
             }
             
-            if (navigator.vibrate) navigator.vibrate(50); // 성공 진동 묵직하게
+            if (navigator.vibrate) navigator.vibrate(50); // 성공 진동 피드백
 
             const atomCount = Object.values(matchedMol.formula).reduce((a,b)=>a+b,0);
             
@@ -571,9 +607,11 @@ const HexaConnectGame = ({ mode, onEnd }) => {
                             : '드래그로 원소를 묶어 완벽한 분자식을 조립하세요.'}
                 </div>
                 
+                {/* 게임 보드 컨테이너: 이벤트 통합 제어 */}
                 <div 
                     ref={boardRef} 
-                    className="relative w-full max-w-[360px] aspect-square bg-slate-800/90 rounded-2xl p-2.5 grid grid-cols-6 grid-rows-6 gap-1.5 shadow-2xl border border-slate-700 touch-none"
+                    className="relative w-full max-w-[360px] bg-slate-800/90 rounded-2xl shadow-2xl border border-slate-700 touch-none"
+                    style={{ minHeight: '320px' }} // 초기화 전 높이 유지용
                     onPointerDown={handlePointerDown}
                     onPointerMove={handlePointerMove}
                     onPointerUp={handlePointerUp}
@@ -582,8 +620,8 @@ const HexaConnectGame = ({ mode, onEnd }) => {
                 >
                     <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none z-10" />
                     
-                    {/* SVG 라인 드로잉 추가: 수학 캐싱 데이터 사용 */}
-                    <svg className="absolute inset-0 w-full h-full pointer-events-none z-15">
+                    {/* 연결선 시각화 (SVG Polyline) */}
+                    <svg className="absolute inset-0 w-full h-full pointer-events-none z-15 overflow-visible">
                         {lines.length > 1 && (
                             <polyline 
                                 points={lines.map(p => `${p.x},${p.y}`).join(' ')} 
@@ -597,24 +635,28 @@ const HexaConnectGame = ({ mode, onEnd }) => {
                         )}
                     </svg>
                     
+                    {/* 벌집 배열 셀 렌더링 */}
                     {grid.map((cell, idx) => {
                         const isSelected = path.includes(idx);
                         const safeColor = cell && ATOM_INFO[cell.sym] ? ATOM_INFO[cell.sym].color : 'transparent';
                         const safeText = cell && ATOM_INFO[cell.sym] ? ATOM_INFO[cell.sym].text : 'transparent';
+                        const bounds = cellBoundsRef.current[idx];
                         
-                        return (
+                        return bounds ? (
                             <div 
                                 key={cell?.id || idx} 
                                 data-index={idx}
-                                // 이벤트 처리를 보드로 이관했으므로 셀 자체의 이벤트를 차단(pass-through)하여 안정성 확보
-                                className={`w-full h-full rounded-full flex items-center justify-center font-black text-lg transition-all duration-75 select-none pointer-events-none
+                                className={`absolute rounded-full flex items-center justify-center font-black text-lg transition-all duration-75 select-none pointer-events-none
                                     ${isSelected ? 'scale-90 ring-4 ring-emerald-400 z-20 shadow-[0_0_15px_rgba(52,211,100,0.6)]' : ''}
                                     ${cell ? 'shadow-md border-b-4 border-black/30' : 'opacity-10'}`}
-                                style={{ backgroundColor: safeColor, color: safeText }}
+                                style={{ 
+                                    left: bounds.left, top: bounds.top, width: bounds.w, height: bounds.h,
+                                    backgroundColor: safeColor, color: safeText 
+                                }}
                             >
                                 {cell?.sym}
                             </div>
-                        )
+                        ) : null;
                     })}
                     
                     {messages.map(msg => (
@@ -636,7 +678,6 @@ const HexaConnectGame = ({ mode, onEnd }) => {
 // 공통 & 부가 뷰 (명예의 전당, 인트로, 보고서, 도감 모달)
 // ==========================================
 
-// --- Google Sheets 기반 실시간 랭킹 시스템 ---
 const Leaderboard = () => {
     const [leaders, setLeaders] = useState([]);
     const [selectedTab, setSelectedTab] = useState('타임어택'); 
@@ -651,11 +692,9 @@ const Leaderboard = () => {
         setIsLoading(true);
         setErrorMsg('');
         try {
-            // 구글 앱스 스크립트에서 데이터 가져오기 (캐싱 방지)
             const res = await fetch(GOOGLE_SCRIPT_URL + "?t=" + Date.now());
             const rawData = await res.json();
             
-            // '점수' 유형만 필터링 후 맵핑
             const scores = rawData.filter(d => d['유형'] === '점수');
             const mapped = scores.map(d => ({
                 studentId: d['학번'],
@@ -727,7 +766,6 @@ const Leaderboard = () => {
     );
 };
 
-// --- 분자 도감 모달 컴포넌트 ---
 const DictionaryModal = ({ isOpen, onClose }) => {
     const sortedMolecules = useMemo(() => {
         return [...MOLECULES].map(mol => {
@@ -819,7 +857,6 @@ const IntroView = ({ onSelectMode, onOpenReport, onOpenGuide }) => {
     );
 };
 
-// --- 구글 시트 점수 전송 뷰 ---
 const ResultView = ({ gameData, onSubmit }) => {
     const [formData, setFormData] = useState({ studentId: '', studentName: '' });
     const [showError, setShowError] = useState('');
@@ -848,7 +885,7 @@ const ResultView = ({ gameData, onSubmit }) => {
                 headers: { 'Content-Type': 'text/plain' },
                 body: JSON.stringify(payload)
             });
-            onSubmit(); // no-cors 특성상 성공 즉시 이동
+            onSubmit(); 
         } catch (err) {
             console.error("Sheet submit error", err);
             setShowError("서버 전송 중 오류가 발생했습니다.");
@@ -892,7 +929,6 @@ const ResultView = ({ gameData, onSubmit }) => {
     );
 };
 
-// --- 구글 시트 보고서 전송 뷰 ---
 const FinalReportView = ({ onBack }) => {
     const [answers, setAnswers] = useState({});
     const [formData, setFormData] = useState({ studentId: '', studentName: '', insight: '' });
@@ -974,7 +1010,6 @@ const FinalReportView = ({ onBack }) => {
     );
 };
 
-// --- 교사용 시트 연동 코드 (doGet, doPost 포함) ---
 const AdminGuideModal = ({ isOpen, onClose }) => {
     const [copied, setCopied] = useState(false);
     if(!isOpen) return null;
