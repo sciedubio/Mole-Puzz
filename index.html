@@ -218,17 +218,17 @@ const HexaConnectGame = ({ mode, onEnd }) => {
     const [timeLeft, setTimeLeft] = useState(mode === 'time' ? 60 : (mode === 'mission' ? 90 : 0));
     const [missionTarget, setMissionTarget] = useState(null);
     const [bountyTarget, setBountyTarget] = useState(null); 
-    const [pushTimer, setPushTimer] = useState(4);
+    const [pushTimer, setPushTimer] = useState(mode === 'survival' ? 6.0 : 4.0);
     const [survivedTime, setSurvivedTime] = useState(0);
     
-    const [forceRender, setForceRender] = useState(0); // 렌더링 강제 업데이트용
+    const [forceRender, setForceRender] = useState(0);
 
-    const pushIntervalRef = useRef(4);
+    const pushIntervalRef = useRef(mode === 'survival' ? 6.0 : 4.0);
     const comboTimerRef = useRef(0);
     const canvasRef = useRef(null);
     const engineRef = useRef(null);
     const boardRef = useRef(null);
-    const cellBoundsRef = useRef([]); // 정밀 수학 좌표 캐싱 배열
+    const cellBoundsRef = useRef([]); 
     const isGameOverRef = useRef(false);
 
     const getRandomAtom = () => ATOM_POOL[Math.floor(Math.random() * ATOM_POOL.length)];
@@ -242,7 +242,7 @@ const HexaConnectGame = ({ mode, onEnd }) => {
         return () => { if (boardEl) boardEl.removeEventListener('touchmove', preventTouchScroll); }
     }, []);
 
-    // 1. 단 한번 수학적으로 그리드 좌표를 싹 계산해서 캐싱 (벌집 지그재그 배열)
+    // 수학적으로 그리드 좌표 계산 (벌집 지그재그 배열)
     const updateCellBounds = useCallback(() => {
         if (!boardRef.current) return;
         const rect = boardRef.current.getBoundingClientRect();
@@ -250,22 +250,17 @@ const HexaConnectGame = ({ mode, onEnd }) => {
         const padding = 12; 
         const gap = 8;
         
-        // 6 columns + 5 gaps + 0.5 column shift (for odd rows to create hex pattern)
         const availableWidth = rect.width - (padding * 2);
         const cellW = (availableWidth - 5 * gap) / 6.5; 
-        const cellH = cellW; // perfect circle
+        const cellH = cellW;
         
         const bounds = [];
         for (let r = 0; r < GRID_SIZE; r++) {
             for (let c = 0; c < GRID_SIZE; c++) {
-                // 홀수 줄은 오른쪽으로 반 칸씩 밀어 벌집 형태로 엇갈리게 만듭니다.
                 const xOffset = (r % 2 === 1) ? (cellW + gap) / 2 : 0;
                 const left = padding + c * (cellW + gap) + xOffset;
-                
-                // 원형 블록들이 위아래로 깊숙이 맞물리도록 간격을 좁힙니다 (0.88 배율)
                 const top = padding + r * (cellH + gap) * 0.88; 
                 
-                // 중심 좌표 계산 (SVG 라인 및 파티클 기준점)
                 const cx = left + cellW / 2;
                 const cy = top + cellH / 2;
                 
@@ -274,15 +269,12 @@ const HexaConnectGame = ({ mode, onEnd }) => {
         }
         cellBoundsRef.current = bounds;
         
-        // 전체 높이를 동적으로 설정
         const totalH = padding * 2 + (GRID_SIZE - 1) * (cellH + gap) * 0.88 + cellH;
         boardRef.current.style.height = `${totalH}px`;
         
-        // UI 위치 업데이트를 위한 렌더링 강제
         setForceRender(prev => prev + 1);
     }, []);
 
-    // 화면 리사이즈 시 좌표 재계산
     useEffect(() => {
         updateCellBounds();
         const timerId = setTimeout(updateCellBounds, 100); 
@@ -293,7 +285,7 @@ const HexaConnectGame = ({ mode, onEnd }) => {
         };
     }, [updateCellBounds, grid]); 
 
-    // 2. SVG 라인 좌표 업데이트 (수학적 캐싱 데이터 활용)
+    // SVG 라인 좌표 업데이트
     useEffect(() => {
         if (!boardRef.current || path.length === 0 || cellBoundsRef.current.length === 0) {
             setLines([]);
@@ -301,7 +293,7 @@ const HexaConnectGame = ({ mode, onEnd }) => {
         }
         const newLines = path.map(idx => {
             const cell = cellBoundsRef.current[idx];
-            return { x: cell.cx, y: cell.cy }; // 보드 내 절대 좌표 사용
+            return { x: cell.cx, y: cell.cy }; 
         });
         setLines(newLines);
     }, [path, forceRender]);
@@ -309,7 +301,7 @@ const HexaConnectGame = ({ mode, onEnd }) => {
     useEffect(() => {
         let initial = [];
         if (mode === 'survival') {
-            for(let i=0; i<TOTAL_CELLS; i++) initial.push(i >= TOTAL_CELLS/2 ? { id: Math.random(), sym: getRandomAtom() } : null);
+            for(let i=0; i<TOTAL_CELLS; i++) initial.push(i >= TOTAL_CELLS - GRID_SIZE ? { id: Math.random(), sym: getRandomAtom() } : null);
         } else {
             for(let i=0; i<TOTAL_CELLS; i++) initial.push({ id: Math.random(), sym: getRandomAtom() });
         }
@@ -358,7 +350,7 @@ const HexaConnectGame = ({ mode, onEnd }) => {
                 setPushTimer(prev => {
                     if (prev <= 0.1) {
                         triggerSurvivalPush();
-                        pushIntervalRef.current = Math.max(1.2, pushIntervalRef.current - 0.05);
+                        pushIntervalRef.current = Math.max(2.0, pushIntervalRef.current - 0.05);
                         return pushIntervalRef.current;
                     }
                     return prev - 0.1;
@@ -386,29 +378,23 @@ const HexaConnectGame = ({ mode, onEnd }) => {
         });
     }, [score, onEnd]);
 
-    // Hexagon(지그재그) 전용 인접 판별 알고리즘
     const isAdjacent = (idx1, idx2) => {
         if (idx1 === null || idx2 === null) return false;
         const r1 = Math.floor(idx1 / GRID_SIZE), c1 = idx1 % GRID_SIZE;
         const r2 = Math.floor(idx2 / GRID_SIZE), c2 = idx2 % GRID_SIZE;
         
-        // 같은 가로줄일 경우 좌우 1칸 차이
         if (r1 === r2) return Math.abs(c1 - c2) === 1;
         
-        // 바로 위나 아래 줄일 경우
         if (Math.abs(r1 - r2) === 1) {
             if (r1 % 2 === 0) {
-                // 현재가 짝수 줄(왼쪽 쏠림)일 때: 위/아래 줄은 나보다 오른쪽으로 밀려있음
                 return c2 === c1 || c2 === c1 - 1;
             } else {
-                // 현재가 홀수 줄(오른쪽 쏠림)일 때: 위/아래 줄은 나보다 왼쪽으로 밀려있음
                 return c2 === c1 || c2 === c1 + 1;
             }
         }
         return false;
     };
 
-    // 3. 거리 기반 무한 정밀 터치 알고리즘 (빈틈 데드존 완벽 제거)
     const getIndexFromPointer = (clientX, clientY) => {
         if (!boardRef.current) return null;
         const rect = boardRef.current.getBoundingClientRect();
@@ -422,7 +408,6 @@ const HexaConnectGame = ({ mode, onEnd }) => {
             const absCy = rect.top + cell.cy;
             const dist = Math.hypot(clientX - absCx, clientY - absCy);
             
-            // 반지름의 1.3배 거리까지 자석처럼 인식 (대각선 간섭 완벽 무시)
             if (dist < cell.r * 1.3 && dist < minDist) {
                 minDist = dist;
                 closestIdx = cell.idx;
@@ -449,11 +434,9 @@ const HexaConnectGame = ({ mode, onEnd }) => {
         if (idx !== null && grid[idx]) {
             const lastIdx = path[path.length - 1];
             if (path.length > 1 && path[path.length - 2] === idx) {
-                // 뒤로 드래그 시 취소 (스마트 취소)
                 setPath(prev => prev.slice(0, -1)); 
                 if (navigator.vibrate) navigator.vibrate(15);
             } else if (!path.includes(idx) && isAdjacent(lastIdx, idx)) {
-                // 새로운 인접 셀 연결
                 setPath(prev => [...prev, idx]);
                 if (navigator.vibrate) navigator.vibrate(15);
             }
@@ -487,12 +470,15 @@ const HexaConnectGame = ({ mode, onEnd }) => {
                 py = cell.cy;
             }
             
-            if (navigator.vibrate) navigator.vibrate(50); // 성공 진동 피드백
+            if (navigator.vibrate) navigator.vibrate(50); // 성공 진동
 
             const atomCount = Object.values(matchedMol.formula).reduce((a,b)=>a+b,0);
             
             let isMissionSuccess = (mode === 'mission' && matchedMol.id === missionTarget?.id);
             let isBountySuccess = (mode !== 'mission' && matchedMol.id === bountyTarget?.id);
+
+            // 서바이벌 모드 보너스: 현상금 분자이거나 4원자 이상 결합 시 라인 클리어 폭탄!
+            let triggerBomb = mode === 'survival' && (isBountySuccess || atomCount >= 4);
 
             let multiplier = 1 + (combo * 0.15); 
             if (isMissionSuccess) multiplier *= 2.0; 
@@ -501,6 +487,29 @@ const HexaConnectGame = ({ mode, onEnd }) => {
             if (engineRef.current) {
                 const color = isBountySuccess ? '#fbbf24' : (ATOM_INFO[grid[lastIdx].sym]?.color || '#10b981');
                 engineRef.current.explode(px, py, color, isBountySuccess ? 50 : 35);
+                
+                if (triggerBomb) {
+                    let newGridMock = [...grid];
+                    path.forEach(idx => newGridMock[idx] = null);
+                    let highestRow = -1;
+                    for (let r = 0; r < GRID_SIZE; r++) {
+                        for (let c = 0; c < GRID_SIZE; c++) {
+                            if (newGridMock[r * GRID_SIZE + c] !== null) { highestRow = r; break; }
+                        }
+                        if (highestRow !== -1) break;
+                    }
+                    if (highestRow !== -1 && boardRef.current) {
+                        for (let c = 0; c < GRID_SIZE; c++) {
+                            let targetIdx = highestRow * GRID_SIZE + c;
+                            if (newGridMock[targetIdx]) {
+                                const bCell = cellBoundsRef.current[targetIdx];
+                                if (bCell) {
+                                    engineRef.current.explode(bCell.cx, bCell.cy, '#ef4444', 20);
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             const earnedPts = Math.round((atomCount * 60) * multiplier);
@@ -519,12 +528,28 @@ const HexaConnectGame = ({ mode, onEnd }) => {
             }
 
             let msgText = isBountySuccess ? `🔥 <span class="text-amber-400">현상금 헌터!</span><br/>${matchedMol.name}` : matchedMol.name;
+            if (triggerBomb) msgText += `<br/><span class="text-red-400 text-sm">💣 라인 클리어!</span>`;
 
             setMessages(prev => [...prev, { id: Date.now(), text: msgText, bonus: earnedPts, x: px, y: py }]);
 
             setGrid(prevGrid => {
                 let newGrid = [...prevGrid];
                 path.forEach(idx => newGrid[idx] = null);
+                
+                if (triggerBomb) {
+                    let highestRow = -1;
+                    for (let r = 0; r < GRID_SIZE; r++) {
+                        for (let c = 0; c < GRID_SIZE; c++) {
+                            if (newGrid[r * GRID_SIZE + c] !== null) { highestRow = r; break; }
+                        }
+                        if (highestRow !== -1) break;
+                    }
+                    if (highestRow !== -1) {
+                        for (let c = 0; c < GRID_SIZE; c++) {
+                            newGrid[highestRow * GRID_SIZE + c] = null;
+                        }
+                    }
+                }
                 
                 for (let c = 0; c < GRID_SIZE; c++) {
                     let column = [];
@@ -601,7 +626,7 @@ const HexaConnectGame = ({ mode, onEnd }) => {
                 
                 <div className="text-slate-400 mb-4 text-center text-xs absolute top-4">
                     {mode === 'survival' 
-                        ? '💥 바닥에서 차오릅니다! 닿기전에 터뜨리세요!' 
+                        ? '💥 4원자 이상 완성 또는 현상금 달성 시 맨 윗줄이 폭파됩니다!' 
                         : mode === 'zen' 
                             ? '편안하게 여러 분자를 자유롭게 조합하세요.'
                             : '드래그로 원소를 묶어 완벽한 분자식을 조립하세요.'}
