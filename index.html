@@ -27,7 +27,6 @@
     
     <style>
         :root { --safe-top: env(safe-area-inset-top, 0px); --safe-bottom: env(safe-area-inset-bottom, 0px); }
-        /* 스와이프 새로고침 및 브라우저 기본 드래그 완벽 방지 */
         body { 
             background-color: #0f172a; 
             color: #f8fafc; 
@@ -100,7 +99,6 @@ const MOLECULES = [
     { id: 'O3', name: '오존', formulaHtml: 'O<sub>3</sub>', formula: { O: 3 } },
     { id: 'SO2', name: '이산화 황', formulaHtml: 'SO<sub>2</sub>', formula: { S: 1, O: 2 } },
     { id: 'CF4', name: '사플루오린화 탄소', formulaHtml: 'CF<sub>4</sub>', formula: { C: 1, F: 4 } },
-    // --- 신규 추가된 분자 레시피 ---
     { id: 'CO', name: '일산화 탄소', formulaHtml: 'CO', formula: { C: 1, O: 1 } },
     { id: 'NO', name: '일산화 질소', formulaHtml: 'NO', formula: { N: 1, O: 1 } },
     { id: 'NO2', name: '이산화 질소', formulaHtml: 'NO<sub>2</sub>', formula: { N: 1, O: 2 } },
@@ -241,7 +239,6 @@ const HexaConnectGame = ({ mode, onEnd }) => {
     const getRandomAtom = () => ATOM_POOL[Math.floor(Math.random() * ATOM_POOL.length)];
     const getRandomMission = () => MOLECULES[Math.floor(Math.random() * MOLECULES.length)];
 
-    // 모바일 스크롤 강제 차단 (touchmove 방지)
     useEffect(() => {
         const preventTouchScroll = (e) => { e.preventDefault(); };
         const boardEl = boardRef.current;
@@ -249,7 +246,6 @@ const HexaConnectGame = ({ mode, onEnd }) => {
         return () => { if (boardEl) boardEl.removeEventListener('touchmove', preventTouchScroll); }
     }, []);
 
-    // 수학적으로 그리드 좌표 계산 (벌집 지그재그 배열)
     const updateCellBounds = useCallback(() => {
         if (!boardRef.current) return;
         const rect = boardRef.current.getBoundingClientRect();
@@ -292,7 +288,6 @@ const HexaConnectGame = ({ mode, onEnd }) => {
         };
     }, [updateCellBounds, grid]); 
 
-    // SVG 라인 좌표 업데이트
     useEffect(() => {
         if (!boardRef.current || path.length === 0 || cellBoundsRef.current.length === 0) {
             setLines([]);
@@ -391,13 +386,9 @@ const HexaConnectGame = ({ mode, onEnd }) => {
         const r2 = Math.floor(idx2 / GRID_SIZE), c2 = idx2 % GRID_SIZE;
         
         if (r1 === r2) return Math.abs(c1 - c2) === 1;
-        
         if (Math.abs(r1 - r2) === 1) {
-            if (r1 % 2 === 0) {
-                return c2 === c1 || c2 === c1 - 1;
-            } else {
-                return c2 === c1 || c2 === c1 + 1;
-            }
+            if (r1 % 2 === 0) return c2 === c1 || c2 === c1 - 1;
+            else return c2 === c1 || c2 === c1 + 1;
         }
         return false;
     };
@@ -484,7 +475,6 @@ const HexaConnectGame = ({ mode, onEnd }) => {
             let isMissionSuccess = (mode === 'mission' && matchedMol.id === missionTarget?.id);
             let isBountySuccess = (mode !== 'mission' && matchedMol.id === bountyTarget?.id);
 
-            // 서바이벌 모드 보너스: 현상금 분자이거나 4원자 이상 결합 시 라인 클리어 폭탄!
             let triggerBomb = mode === 'survival' && (isBountySuccess || atomCount >= 4);
 
             let multiplier = 1 + (combo * 0.15); 
@@ -710,57 +700,45 @@ const HexaConnectGame = ({ mode, onEnd }) => {
 // 공통 & 부가 뷰 (명예의 전당, 인트로, 보고서, 도감 모달)
 // ==========================================
 
-const Leaderboard = () => {
-    const [leaders, setLeaders] = useState([]);
+const Leaderboard = ({ leaders, isLoading, errorMsg, onRefresh }) => {
     const [selectedTab, setSelectedTab] = useState('타임어택'); 
-    const [isLoading, setIsLoading] = useState(false);
-    const [errorMsg, setErrorMsg] = useState('');
+    const [schoolFilter, setSchoolFilter] = useState('전체');
 
-    const fetchLeaderboard = useCallback(async () => {
-        if (!GOOGLE_SCRIPT_URL) {
-            setErrorMsg("구글 시트 연동 URL이 설정되지 않았습니다.");
-            return;
-        }
-        setIsLoading(true);
-        setErrorMsg('');
-        try {
-            const res = await fetch(GOOGLE_SCRIPT_URL + "?t=" + Date.now());
-            const rawData = await res.json();
-            
-            const scores = rawData.filter(d => d['유형'] === '점수');
-            const mapped = scores.map(d => ({
-                studentId: d['학번'],
-                studentName: d['이름'],
-                mode: d['모드'],
-                score: Number(d['점수']) || 0
-            }));
-            setLeaders(mapped);
-        } catch (e) {
-            console.error("Sheet Fetch Error:", e);
-            setErrorMsg("명예의 전당 로드 실패. URL을 확인하세요.");
-        } finally {
-            setIsLoading(false);
-        }
-    }, []);
+    const uniqueSchools = useMemo(() => {
+        return ['전체', ...new Set(leaders.map(l => l.schoolName).filter(Boolean))].sort();
+    }, [leaders]);
 
-    useEffect(() => {
-        fetchLeaderboard();
-    }, [fetchLeaderboard]);
-
+    // 필터 조건 업데이트: 상위 15등 표시
     const filteredLeaders = useMemo(() => {
-        return leaders.filter(l => l.mode === selectedTab).sort((a, b) => b.score - a.score).slice(0, 10);
-    }, [leaders, selectedTab]);
+        return leaders
+            .filter(l => l.mode === selectedTab && (schoolFilter === '전체' || l.schoolName === schoolFilter))
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 15);
+    }, [leaders, selectedTab, schoolFilter]);
 
     return (
         <div className="glass-panel rounded-2xl p-4 w-full max-w-md mx-auto mb-6 relative">
             <div className="flex justify-between items-center mb-3">
-                <div className="w-8"></div>
-                <h3 className="text-lg font-black text-center text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-400 flex items-center gap-1.5">
-                    👑 명예의 전당 Top 10 👑
+                {/* 랭킹 학교별 필터링 드롭다운 */}
+                <div className="w-1/4">
+                    <select 
+                        value={schoolFilter} 
+                        onChange={(e) => setSchoolFilter(e.target.value)}
+                        className="w-full bg-slate-800 text-[10px] text-amber-400 border border-slate-700 rounded p-1.5 outline-none truncate"
+                    >
+                        {uniqueSchools.map(s => <option key={s} value={s}>{s === '전체' ? '전체 학교' : s}</option>)}
+                    </select>
+                </div>
+                
+                <h3 className="text-md font-black text-center text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-400 flex items-center gap-1.5 whitespace-nowrap">
+                    👑 명예의 전당 Top 15
                 </h3>
-                <button onClick={fetchLeaderboard} className="text-slate-400 hover:text-white transition w-8 text-lg active:scale-95" title="새로고침">
-                    🔄
-                </button>
+                
+                <div className="w-1/4 flex justify-end">
+                    <button onClick={onRefresh} className="text-slate-400 hover:text-white transition text-lg active:scale-95" title="새로고침">
+                        🔄
+                    </button>
+                </div>
             </div>
             
             <div className="flex bg-slate-900/60 p-1 rounded-xl mb-3 border border-slate-800 gap-1">
@@ -782,12 +760,17 @@ const Leaderboard = () => {
             ) : filteredLeaders.length === 0 ? (
                 <div className="text-center text-slate-400 text-xs py-4 leading-relaxed">아직 등록된 기록이 없습니다.<br/>지금 가장 먼저 기록을 세워보세요!</div>
             ) : (
-                <div className="space-y-1.5 max-h-[190px] overflow-y-auto scrollable-panel">
+                <div className="space-y-1.5 max-h-[250px] overflow-y-auto scrollable-panel">
                     {filteredLeaders.map((l, i) => (
                         <div key={i} className={`flex justify-between items-center p-2 rounded-lg text-xs ${i===0?'bg-yellow-500/15 border border-yellow-500/30': i===1?'bg-slate-300/10': i===2?'bg-orange-700/20':'bg-slate-800/40'}`}>
                             <div className="flex items-center gap-2">
-                                <span className={`font-black w-4 text-center ${i===0?'text-yellow-400':i===1?'text-slate-300':i===2?'text-orange-400':'text-slate-500'}`}>{i+1}</span>
-                                <span className="font-bold text-white">{l.studentName} <span className="text-[10px] text-slate-400 font-normal">({l.studentId})</span></span>
+                                <span className={`font-black w-5 text-center ${i===0?'text-yellow-400':i===1?'text-slate-300':i===2?'text-orange-400':'text-slate-500'}`}>{i+1}</span>
+                                <div className="flex flex-col">
+                                    <span className="font-bold text-white leading-tight">
+                                        {l.studentName} <span className="text-[9px] text-slate-400 font-normal">({l.studentId})</span>
+                                    </span>
+                                    {l.schoolName && <span className="text-[9px] text-blue-300/80 leading-tight">{l.schoolName}</span>}
+                                </div>
                             </div>
                             <span className="font-black text-amber-400">{l.score.toLocaleString()}</span>
                         </div>
@@ -838,7 +821,7 @@ const DictionaryModal = ({ isOpen, onClose }) => {
     );
 };
 
-const IntroView = ({ onSelectMode, onOpenReport, onOpenGuide }) => {
+const IntroView = ({ onSelectMode, onOpenReport, onOpenGuide, leaders, isLoading, errorMsg, onRefresh }) => {
     const [isDictOpen, setIsDictOpen] = useState(false);
 
     return (
@@ -862,7 +845,7 @@ const IntroView = ({ onSelectMode, onOpenReport, onOpenGuide }) => {
                 </button>
             </div>
 
-            <Leaderboard />
+            <Leaderboard leaders={leaders} isLoading={isLoading} errorMsg={errorMsg} onRefresh={onRefresh} />
 
             <div className="w-full max-w-md space-y-2.5">
                 <button onClick={()=>onSelectMode('time')} className="w-full glass-panel rounded-xl p-3.5 flex items-center gap-4 text-left hover:bg-slate-700/40 transition active:scale-95 border-l-4 border-l-blue-400">
@@ -889,23 +872,37 @@ const IntroView = ({ onSelectMode, onOpenReport, onOpenGuide }) => {
     );
 };
 
-const ResultView = ({ gameData, onSubmit }) => {
-    const [formData, setFormData] = useState({ studentId: '', studentName: '' });
+const ResultView = ({ gameData, onSubmit, uniqueSchools }) => {
+    // 자동 기억 (로컬 스토리지 데이터 로드)
+    const [formData, setFormData] = useState({ 
+        schoolName: localStorage.getItem('hz_school') || '',
+        studentId: localStorage.getItem('hz_stdId') || '', 
+        studentName: localStorage.getItem('hz_name') || '' 
+    });
     const [showError, setShowError] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     const handleLeaderboardSubmit = async () => {
-        if (!formData.studentId || !formData.studentName) { setShowError('학번과 이름을 올바르게 입력해주세요.'); return; }
+        if (!formData.schoolName || !formData.studentId || !formData.studentName) { 
+            setShowError('학교, 학번, 이름을 모두 입력해주세요.'); 
+            return; 
+        }
         if (!GOOGLE_SCRIPT_URL) { setShowError('구글 시트 연동 URL이 설정되지 않았습니다.'); return; }
         
         setIsSubmitting(true);
         const modeStr = gameData.mode === 'time' ? '타임어택' : (gameData.mode === 'mission' ? '오더미션' : '서바이벌');
 
+        // 입력 데이터 스마트폰에 자동 저장
+        localStorage.setItem('hz_school', formData.schoolName.trim());
+        localStorage.setItem('hz_stdId', formData.studentId.trim());
+        localStorage.setItem('hz_name', formData.studentName.trim());
+
         const payload = {
             type: '점수',
             timestamp: new Date().toLocaleString(),
-            studentId: formData.studentId,
-            studentName: formData.studentName,
+            schoolName: formData.schoolName.trim(),
+            studentId: formData.studentId.trim(),
+            studentName: formData.studentName.trim(),
             mode: modeStr,
             score: gameData.score
         };
@@ -942,9 +939,39 @@ const ResultView = ({ gameData, onSubmit }) => {
 
                     {gameData.mode !== 'zen' ? (
                         <div className="space-y-3 pt-2 text-left">
-                            <div className="flex gap-2">
-                                <input type="text" placeholder="학번" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm outline-none focus:border-amber-500" value={formData.studentId} onChange={e => setFormData({...formData, studentId: e.target.value})} />
-                                <input type="text" placeholder="이름" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm outline-none focus:border-amber-500" value={formData.studentName} onChange={e => setFormData({...formData, studentName: e.target.value})} />
+                            <div className="grid grid-cols-3 gap-2">
+                                <div className="col-span-3">
+                                    <input 
+                                        list="school-list" 
+                                        type="text" 
+                                        placeholder="학교명 (선택 또는 입력)" 
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm outline-none focus:border-amber-500" 
+                                        value={formData.schoolName} 
+                                        onChange={e => setFormData({...formData, schoolName: e.target.value})} 
+                                    />
+                                    {/* 기존 시트 데이터 기반 자동완성 목록 */}
+                                    <datalist id="school-list">
+                                        {uniqueSchools.map(s => <option key={s} value={s} />)}
+                                    </datalist>
+                                </div>
+                                <div className="col-span-1">
+                                    <input 
+                                        type="text" 
+                                        placeholder="학번" 
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm outline-none focus:border-amber-500" 
+                                        value={formData.studentId} 
+                                        onChange={e => setFormData({...formData, studentId: e.target.value})} 
+                                    />
+                                </div>
+                                <div className="col-span-2">
+                                    <input 
+                                        type="text" 
+                                        placeholder="이름" 
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm outline-none focus:border-amber-500" 
+                                        value={formData.studentName} 
+                                        onChange={e => setFormData({...formData, studentName: e.target.value})} 
+                                    />
+                                </div>
                             </div>
                             <Button onClick={handleLeaderboardSubmit} className="w-full py-3.5 text-md" disabled={isSubmitting}>{isSubmitting ? '등록 중...' : '🏆 명예의 전당 기록 등록하기'}</Button>
                         </div>
@@ -963,7 +990,12 @@ const ResultView = ({ gameData, onSubmit }) => {
 
 const FinalReportView = ({ onBack }) => {
     const [answers, setAnswers] = useState({});
-    const [formData, setFormData] = useState({ studentId: '', studentName: '', insight: '' });
+    const [formData, setFormData] = useState({ 
+        schoolName: localStorage.getItem('hz_school') || '',
+        studentId: localStorage.getItem('hz_stdId') || '', 
+        studentName: localStorage.getItem('hz_name') || '', 
+        insight: '' 
+    });
     const [showError, setShowError] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [quizQuestions, setQuizQuestions] = useState([]);
@@ -971,18 +1003,27 @@ const FinalReportView = ({ onBack }) => {
     useEffect(() => setQuizQuestions([...QUIZ_POOL].sort(() => 0.5 - Math.random()).slice(0, 3)), []);
 
     const handleReportSubmit = async () => {
-        if (!formData.studentId || !formData.studentName || !formData.insight) { setShowError('모든 정보를 빠짐없이 입력하세요.'); return; }
+        if (!formData.schoolName || !formData.studentId || !formData.studentName || !formData.insight) { 
+            setShowError('학교, 학번, 이름, 성찰 내용을 모두 입력하세요.'); 
+            return; 
+        }
         if (Object.keys(answers).length < 3) { setShowError('퀴즈 3문항을 모두 제출하세요.'); return; }
         if (!GOOGLE_SCRIPT_URL) { setShowError('구글 시트 연동 URL이 설정되지 않았습니다.'); return; }
         
         setIsSubmitting(true);
         let quizScore = Math.round(Object.keys(answers).reduce((acc, i) => acc + (answers[i] === quizQuestions[i].a ? 33.3 : 0), 0));
 
+        // 입력 데이터 자동 저장
+        localStorage.setItem('hz_school', formData.schoolName.trim());
+        localStorage.setItem('hz_stdId', formData.studentId.trim());
+        localStorage.setItem('hz_name', formData.studentName.trim());
+
         const payload = { 
             type: '보고서',
             timestamp: new Date().toLocaleString(), 
-            studentId: formData.studentId,
-            studentName: formData.studentName,
+            schoolName: formData.schoolName.trim(),
+            studentId: formData.studentId.trim(),
+            studentName: formData.studentName.trim(),
             quizScore, 
             insight: formData.insight 
         };
@@ -1008,9 +1049,16 @@ const FinalReportView = ({ onBack }) => {
                     <div className="w-10"></div>
                 </div>
 
-                <div className="glass-panel rounded-2xl p-4 flex gap-3">
-                    <div className="flex-1"><input type="text" placeholder="학번 (예: 20202)" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm outline-none focus:border-emerald-500" value={formData.studentId} onChange={e => setFormData({...formData, studentId: e.target.value})} /></div>
-                    <div className="flex-1"><input type="text" placeholder="이름" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm outline-none focus:border-emerald-500" value={formData.studentName} onChange={e => setFormData({...formData, studentName: e.target.value})} /></div>
+                <div className="glass-panel rounded-2xl p-4 grid grid-cols-4 gap-2">
+                    <div className="col-span-4">
+                        <input type="text" placeholder="학교명 (예: 한국중)" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm outline-none focus:border-emerald-500" value={formData.schoolName} onChange={e => setFormData({...formData, schoolName: e.target.value})} />
+                    </div>
+                    <div className="col-span-2">
+                        <input type="text" placeholder="학번" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm outline-none focus:border-emerald-500" value={formData.studentId} onChange={e => setFormData({...formData, studentId: e.target.value})} />
+                    </div>
+                    <div className="col-span-2">
+                        <input type="text" placeholder="이름" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm outline-none focus:border-emerald-500" value={formData.studentName} onChange={e => setFormData({...formData, studentName: e.target.value})} />
+                    </div>
                 </div>
 
                 <div className="space-y-3">
@@ -1046,6 +1094,7 @@ const AdminGuideModal = ({ isOpen, onClose }) => {
     const [copied, setCopied] = useState(false);
     if(!isOpen) return null;
     
+    // [중요 업데이트] '학교' 열이 추가된 Apps Script
     const code = `function doGet(e) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   if (sheet.getLastRow() === 0) return ContentService.createTextOutput("[]").setMimeType(ContentService.MimeType.JSON);
@@ -1066,13 +1115,14 @@ const AdminGuideModal = ({ isOpen, onClose }) => {
 function doPost(e) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   if (sheet.getLastRow() === 0) {
-    sheet.appendRow(['유형', '제출시간', '학번', '이름', '모드', '점수', '퀴즈점수', '알게된점']);
+    sheet.appendRow(['유형', '제출시간', '학교', '학번', '이름', '모드', '점수', '퀴즈점수', '알게된점']);
     sheet.getRange(1, 1, 1, sheet.getLastColumn()).setFontWeight('bold').setBackground('#4a86e8').setFontColor('#ffffff');
   }
   var data = JSON.parse(e.postData.contents);
   sheet.appendRow([
     data.type || '점수',
     data.timestamp || '',
+    data.schoolName || '',
     data.studentId || '',
     data.studentName || '',
     data.mode || '',
@@ -1113,12 +1163,55 @@ function doPost(e) {
 };
 
 // ==========================================
-// App 라우팅
+// App 라우팅 및 전역 상태(랭킹) 관리
 // ==========================================
 const App = () => {
     const [view, setView] = useState('intro');
     const [gameData, setGameData] = useState(null);
     const [isGuideOpen, setIsGuideOpen] = useState(false);
+
+    // 글로벌 랭킹 데이터 스토어
+    const [leaders, setLeaders] = useState([]);
+    const [isLoadingLeaders, setIsLoadingLeaders] = useState(false);
+    const [leaderError, setLeaderError] = useState('');
+
+    const fetchLeaderboard = useCallback(async () => {
+        if (!GOOGLE_SCRIPT_URL) {
+            setLeaderError("구글 시트 연동 URL이 설정되지 않았습니다.");
+            return;
+        }
+        setIsLoadingLeaders(true);
+        setLeaderError('');
+        try {
+            const res = await fetch(GOOGLE_SCRIPT_URL + "?t=" + Date.now());
+            const rawData = await res.json();
+            
+            const scores = rawData.filter(d => d['유형'] === '점수');
+            const mapped = scores.map(d => ({
+                schoolName: d['학교'] || '',
+                studentId: d['학번'],
+                studentName: d['이름'],
+                mode: d['모드'],
+                score: Number(d['점수']) || 0
+            }));
+            setLeaders(mapped);
+        } catch (e) {
+            console.error("Sheet Fetch Error:", e);
+            setLeaderError("명예의 전당 로드 실패. URL을 확인하세요.");
+        } finally {
+            setIsLoadingLeaders(false);
+        }
+    }, []);
+
+    // 최초 로드 시 데이터 패치
+    useEffect(() => {
+        fetchLeaderboard();
+    }, [fetchLeaderboard]);
+
+    // 서버 데이터를 기반으로 등록된 모든 '학교 이름' 자동 추출 (중복 제거)
+    const uniqueSchools = useMemo(() => {
+        return [...new Set(leaders.map(l => l.schoolName).filter(Boolean))].sort();
+    }, [leaders]);
 
     const navigate = (v) => { setView(v); history.pushState({view:v}, ''); };
 
@@ -1129,13 +1222,35 @@ const App = () => {
         return () => window.removeEventListener('popstate', onPop);
     }, []);
 
+    // 뷰 전환 시 랭킹 자동 리프레시를 위한 래퍼
+    const handleGameSubmit = () => {
+        fetchLeaderboard();
+        navigate('intro');
+    };
+
     return (
         <div className="relative w-full h-screen-safe overflow-hidden font-sans text-slate-50 bg-slate-900">
             <div className="w-full h-full">
-                {view === 'intro' && <IntroView onSelectMode={(mode) => navigate(mode)} onOpenReport={() => navigate('report')} onOpenGuide={() => setIsGuideOpen(true)} />}
-                {(view === 'time' || view === 'mission' || view === 'survival' || view === 'zen') && <HexaConnectGame mode={view} onEnd={(s) => { setGameData({ score: s, mode: view }); navigate('result'); }} />}
-                {view === 'result' && <ResultView gameData={gameData} onSubmit={() => navigate('intro')} />}
-                {view === 'report' && <FinalReportView onBack={() => navigate('intro')} />}
+                {view === 'intro' && (
+                    <IntroView 
+                        onSelectMode={(mode) => navigate(mode)} 
+                        onOpenReport={() => navigate('report')} 
+                        onOpenGuide={() => setIsGuideOpen(true)}
+                        leaders={leaders}
+                        isLoading={isLoadingLeaders}
+                        errorMsg={leaderError}
+                        onRefresh={fetchLeaderboard}
+                    />
+                )}
+                {(view === 'time' || view === 'mission' || view === 'survival' || view === 'zen') && (
+                    <HexaConnectGame mode={view} onEnd={(s) => { setGameData({ score: s, mode: view }); navigate('result'); }} />
+                )}
+                {view === 'result' && (
+                    <ResultView gameData={gameData} onSubmit={handleGameSubmit} uniqueSchools={uniqueSchools} />
+                )}
+                {view === 'report' && (
+                    <FinalReportView onBack={handleGameSubmit} />
+                )}
             </div>
             <AdminGuideModal isOpen={isGuideOpen} onClose={() => setIsGuideOpen(false)} />
         </div>
